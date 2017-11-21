@@ -3,89 +3,320 @@
 
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <meta name=viewport content="width=device-width, initial-scale=1">
+    <meta name=viewport content="width=device-width, initial-scale=1,user-scalable=no">
     <title>Alessandro Avolio</title>
 
 
-    <link href="https://fonts.googleapis.com/css?family=Lato:300,700" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Raleway:200,700" rel="stylesheet">
     <style>
+        /* @font-face kit by Fonts2u (http://www.fonts2u.com) */
+
+        @font-face {
+            font-family: "Beon-Medium";
+            src: url("Beon.eot?") format("eot"), url("Beon.woff") format("woff"), url("Beon.ttf") format("truetype"), url("Beon.svg#Beon-Medium") format("svg");
+            font-weight: normal;
+            font-style: normal;
+        }
+
         body {
-            background: black;
-            color: white;
-            font-family: 'Lato', sans-serif;
+            transform: rotate3d(0, 0, 0);
+            background: white;
+            color: black;
+            font-family: 'Raleway', sans-serif;
             font-size: 16px;
+            width: 100vw;
+            overflow: hidden;
             /*text-align: center;
             vertical-align: middle;*/
         }
 
-        h1 {
-            font-size: 10em;
-            font-weight: 100;
-            margin: 0;
-            margin-left: -0.2em;
+        main {
+            margin: 10vh 10vw;
         }
 
-        h2 {
+        #first {
+            font-size: 10em;
+            font-weight: 700;
+            margin: 0;
+            width: 100vw;
+            /* overflow: hidden; */
+            /*margin-left: -0.2em;*/
+        }
+
+        #second {
             font-size: 4em;
             font-weight: 500;
             margin: 0;
-            margin-top: -0.2em;
-            margin-left: 1.3em;
-            display: inline-block !important;
-            width: 850px;
+            /* margin-top: -0.2em;
+            margin-left: 1.3em; */
+            /*display: inline-block !important;*/
+            /* width: 90vw; */
             line-height: 80%;
         }
 
-        h3 {
+        #three {
             font-weight: 100;
             /* display: inline !important; */
-            font-size: 1em;
-            margin-top: -2.5em;
-            margin-left: 24.3em;
+            opacity: 0;
+            transition: 3s linear opacity;
+            font-size: 1rem;
+            /* margin-top: -2.5em;
+            margin-left: 24.3em; */
             width: 250px;
-            text-align: justify;
+            text-align: right;
+            line-height: initial;
         }
 
-        h4 {
-            font-size: 0.5em;
-            margin-left: 71em;
-            margin-top: -3.5em;
-        }
+      
 
-        button{
-            border:1px solid white;
-            background: transparent;
+        button {
+            font-family: 'Raleway', sans-serif;
+            border: 1px solid black;
+            background: white;
             margin: auto;
-            margin-top: 10em;
-            color:white;
+            /* margin-top: 5em; */
+            color: black;
             padding: 1em;
             width: 5em;
+            font-weight: 200;
+            display: block;
+            transition: 0.25s linear all;
+            -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none;
         }
 
-        @media (max-width: 850px) {
-            h1,
-            h2,
-            h3,
-            h4 {
+        button:hover {
+            background: black;
+            color: white;
+        }
+
+        *:focus {
+            outline: 0 !important;
+        }
+
+        #aMessageForYou span {
+            display: block;
+            text-align: center;
+            animation-fill-mode: both;
+            animation-duration: 1s;
+            min-height: 2em;
+        }
+
+
+
+        @keyframes fadeOutUp {
+            from {
+                opacity: 1;
+            }
+
+            to {
+                opacity: 0;
+                transform: translate3d(0, -100%, 0);
+            }
+        }
+
+
+        .fadeOutUp {
+            animation-duration: 1s;
+            animation-name: fadeOutUp;
+        }
+
+        .swithLight {
+            animation: neon1 1.5s ease-in-out infinite alternate;
+            
+        }
+        
+        @keyframes neon1 {
+            from {
+                text-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #fff, 0 0 40px #FF1177, 0 0 70px #FF1177, 0 0 80px #FF1177, 0 0 100px #FF1177, 0 0 150px #FF1177;
+            }
+            to {
+                text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #fff, 0 0 20px #FF1177, 0 0 35px #FF1177, 0 0 40px #FF1177, 0 0 50px #FF1177, 0 0 75px #FF1177;
+            }
+        }
+
+        @media (max-width: 650px) {
+            #first,
+            #second,
+            #three{
                 display: inline !important;
                 margin: 0;
             }
-
-            h2 {
-                line-height: 70%;
+            #first {
+                font-size: 30vw;
+                /*line-height:50%;*/
             }
-            h3 {}
-            h4 {}
+            #second {
+                font-size: 10vw;
+                /*line-height: 70%;*/
+            }
+            #three {}
+            
+        }
+
+        body.blackout {
+            color: white;
+            background: black;
+            font-family: 'Beon-Medium', sans-serif;
+        }
+
+        body.blackout button {
+            background: transparent;
         }
     </style>
 </head>
 
 <body>
-    <h1>Sorry,</h1>
-    <h2>I don't have time to make a better site.</h2>
-    <h3> In any case here there is everything about me and my abilities. </h3>
-    <h4>Thanks for visiting ;-)</h4>
-    <button>Enter</button>
+    <main>
+        <div id="first">Sorry,</div>
+        <div id="second">I have no time to make a better site.
+            <!-- <div id="three">In any case here there is everything about me and my abilities. </div> -->
+        </div>
+
+        <!-- <div id="four">Thanks for visiting ;   -)</div> -->
+        <br/>
+    </main>
+    <p id="aMessageForYou">
+        <span id="old"></span>
+        <span id="new"></span>
+    </p>
+    <button id="mySuperMegaYeahButton">Enter</button>
+
+
+    <script>
+        var abutton = document.getElementById('mySuperMegaYeahButton');
+        var aMessageForYou_old = document.getElementById('old');
+        var aMessageForYou_new = document.getElementById('new');
+        var pointOfStory = 0;
+        var step = 1;
+        var blaBlaBlaAboutMe = [
+            "Really, I don't have time to make a better site.",
+            "It's all here. ",
+            "It's true! here there is everything about me and my abilities.",
+            "Thanks to belive that there are something else other this page. Really it's all here.",
+            "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+            "11",
+            "Wow! Do you like a lot press button eh?",
+            "Ah.. it's becuse it's write 'enter'", 
+            "Okay you have a compulsive press button problem.. I move it.", 
+            "Okay, stop or i'll close the light",  "bye!", "Damm it!", "Yet?", "Look behind you, a Three-Headed Monkey!", "Where?","",
+            "Okay you not have god taste if you prefer stay here instead go to play at monkey island.",
+            "No, really the game is over.",
+            "I would also like to keep playing with you but if I had more time I would have made a better site",
+            "Ah okay if you have nothing better to do then maybe you may lose time to follow me on Twitter",
+            "You're back.. You did not have to worry about it.",
+            "Okay I feel that we can start setting up the first button-man friendship.",
+            "But do you know you've been on this page for more time than you would spend reading my CV?",
+            "Okay seriously if you're still here you did not spend your energy well to find what's invisible to your eyes",
+            "Restart!"
+        ]
+        abutton.onclick = function () {
+            thereWasOnce[step++]();
+        }
+
+        var thereWasOnce = [];
+        thereWasOnce[1] = thereWasOnce[2] = thereWasOnce[3] = thereWasOnce[4] = thereWasOnce[5] = thereWasOnce[6] =
+            thereWasOnce[7] = thereWasOnce[8] = thereWasOnce[9] = thereWasOnce[10] = thereWasOnce[11] = thereWasOnce[12] =
+            thereWasOnce[13] = thereWasOnce[14] = thereWasOnce[15] = thereWasOnce[16] = thereWasOnce[17]= thereWasOnce[22]= thereWasOnce[23]= thereWasOnce[24] = thereWasOnce[25]=
+            thereWasOnce[26] = thereWasOnce[27] = thereWasOnce[28] = thereWasOnce[30] = thereWasOnce[31] = thereWasOnce[32] = thereWasOnce[33]  = function (
+                point) {
+                  
+                changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+
+            }
+
+
+        // thereWasOnce[0] = function () {
+        //     document.getElementById('three').style.opacity = 1;
+        // }
+
+        thereWasOnce[17] = function () {
+            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+            abutton.textContent = "Don't touch me";
+        }
+        thereWasOnce[18] = function (x, y) {
+             changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+            abutton.style.transition = '0.6s cubic-bezier(0.22, 0.61, 0.36, 1) all';
+            abutton.style.margin = 0;
+            abutton.style.transform = "translateX(calc(100vw - 100px))";
+            abutton.onmouseover = function () {
+                thereWasOnce[step++]();
+            }
+        }
+        thereWasOnce[19] = function () {
+              changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+            abutton.style.transform = 'translateX(calc(40vw - 100px)) translateY(-200px)  rotateZ(35deg)';
+
+
+        }
+        thereWasOnce[20] = function () {
+              changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+            abutton.style = "color:#444;border-color:#222; width:auto";
+            abutton.textContent = "You don't see me more.. ahhaha!";
+
+            document.getElementsByTagName('body')[0].className = "blackout";
+            document.getElementById('first').className = "swithLight";
+            // document.getElementsByTagName('h1')[0].style="font-family: Monoton";
+            document.getElementById('second').style = " animation: neon1 0.8s ease-in-out infinite alternate;"
+              abutton.onmouseover = undefined;
+
+        }
+        thereWasOnce[21] = function () {
+                changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+                abutton.style = "";
+                abutton.textContent = "A button";
+
+                document.getElementsByTagName('body')[0].className = "";
+                document.getElementById('first').className = "";
+                // document.getElementsByTagName('h1')[0].style="font-family: Monoton";
+                document.getElementById('second').style = ""
+
+            }
+
+        function changeWord(string) {
+            aMessageForYou_old.className = "";
+            setTimeout(function () {
+                aMessageForYou_old.textContent = aMessageForYou_new.textContent;
+                aMessageForYou_new.textContent = string;
+                aMessageForYou_old.className = "fadeOutUp";
+            }, 10);
+        }
+
+        thereWasOnce[24] = function(){
+            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+            if (!("Notification" in window)) {
+                 changeWord("mmm...This browser does not support desktop notification.. so no monkey!");
+            }
+            else if(Notification.permission === "granted") {
+                // If it's okay let's create a notification
+                changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+                var notification = new Notification('Here!!!', {
+                    icon: 'http://main-im-char-1.gamewise.co/177778-full.jpeg',
+                    body: "Please don't click me",
+                });
+
+                notification.onclick = function () {
+                   thereWasOnce[25]();
+                };
+            }else{
+                console.log('dammi i permessi');
+                Notification.requestPermission(thereWasOnce[24]);
+            }
+        }
+
+        thereWasOnce[29] =function(){
+            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+            window.open("https://twitter.com/avol_io", '_blank', 'location=yes'); 
+        }
+        
+        thereWasOnce[34]= function(){
+              pointOfStory=1;
+              step=1;
+              changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+        }
+
+    </script>
 </body>
 
 </html>
