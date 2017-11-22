@@ -338,11 +338,13 @@
                                 body: 'Here!!',
                                 icon: 'icon.jpeg',
                                 image:'icon.jpeg',
-                                vibrate: [200, 100, 200, 100, 200, 100, 200],
+                                vibrate: [1000],
                                 tag: 'vibration-sample'
                             });
                         });
                     }
+                }).catch(function (){
+                    alert('No monkey if you not allow notification');
                 });
             
         }
