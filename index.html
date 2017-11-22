@@ -246,8 +246,10 @@
             "Wow! You sure like a lot pressing a button, don't you?",
             "Ah I see...it's because there's 'Enter' written on it",
             "Okay you have a compulsive button pressing problem...Then I shift it.",
-            "Okay, stop or I'll turn off the lights", "Bye!", "Damn it!", "Still here?",
-            "Look behind you, a Three-Headed Monkey!", "Where?", "",
+            "Okay, stop or I'll turn off the lights", 
+            //17
+            "Bye!", "Damn it!", "Still here?",
+            "Look behind you, a Three-Headed Monkey!", "Where?",
             "If you didn't close your browser to go play Monkey Island after this, I might start questioning your tastes.",
             "Ok, really the game is over.",
             "Listen...I would like to keep playing with you but if I had more time I would have made a better site.",
@@ -270,7 +272,7 @@
             thereWasOnce[26] = thereWasOnce[27] = thereWasOnce[28] = thereWasOnce[30] = thereWasOnce[31] = thereWasOnce[
                 32] = thereWasOnce[33] = function (
                 point) {
-
+                // console.log('step:'+step,'pointOfStory'+pointOfStory);
                 changeWord(blaBlaBlaAboutMe[pointOfStory++]);
 
             }
@@ -302,7 +304,7 @@
         thereWasOnce[20] = function () {
             changeWord(blaBlaBlaAboutMe[pointOfStory++]);
             abutton.textContent = "You don't see me more.. ahhaha!";
-
+            abutton.style="";
             document.getElementsByTagName('body')[0].className = "blackout";
             document.getElementById('first').className = "swithLight";
             // document.getElementsByTagName('h1')[0].style="font-family: Monoton";
