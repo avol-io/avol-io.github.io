@@ -198,7 +198,7 @@
             #three {}
         }
 
-        body.blackout {
+        br, body.blackout {
             color: white;
             background: black;
             font-family: 'Beon-Medium', sans-serif;
@@ -206,6 +206,9 @@
 
         body.blackout button {
             background: transparent;
+            color:#444;
+            border-color:#222; 
+            width:auto
         }
     </style>
 </head>
@@ -298,7 +301,6 @@
         }
         thereWasOnce[20] = function () {
             changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            abutton.style = "color:#444;border-color:#222; width:auto";
             abutton.textContent = "You don't see me more.. ahhaha!";
 
             document.getElementsByTagName('body')[0].className = "blackout";
