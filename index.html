@@ -229,7 +229,7 @@
     </p>
     <button id="mySuperMegaYeahButton">Enter</button>
     <script>
-        navigator.serviceWorker.register('service-worker.js');
+        if(navigator.serviceWorker){navigator.serviceWorker.register('service-worker.js')};
 
         var abutton = document.getElementById('mySuperMegaYeahButton');
         var aMessageForYou_old = document.getElementById('old');
