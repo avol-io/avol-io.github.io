@@ -1,7 +1,7 @@
-<!DOCTYPE HTML>
-<html amp lang="en">
-<!--
-    v0.1
+<!doctype html>
+<html lang="en">
+  <!--
+    v0.1 - 20/12/2017
 
      HI! If you are reading this maybe we are interested into each other. This is a dummy site with a simple vanilla js/css game
     in order to keep you on the website for more than 10 seconds.
@@ -42,341 +42,428 @@
     - The final website? Ahhah... maybe...
 
 -->
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
 
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <meta name=viewport content="width=device-width, initial-scale=1,user-scalable=no">
-    <title>Alessandro Avolio</title>
+    <!-- SEO primario -->
+    <title>Alessandro Avolio — Frontend Tech Lead & Software Engineer</title>
+    <meta
+      name="description"
+      content="Alessandro Avolio — Software Engineer and Frontend Architect. Angular, React, TypeScript specialist based in Italy."
+    />
+    <meta name="author" content="Alessandro Avolio" />
+    <meta name="robots" content="index, follow" />
+    <meta
+      name="keywords"
+      content="Alessandro Avolio, Software Engineer, Frontend Architect, Micro Frontend, Angular, React, TypeScript, JavaScript, CSS, SCSS, PWA, Italy, avol.io"
+    />
+    <link rel="canonical" href="https://avol.io/" />
 
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://avol.io/" />
+    <meta
+      property="og:title"
+      content="Alessandro Avolio — Frontend Architect"
+    />
+    <meta
+      property="og:description"
+      content="Software Engineer and Frontend Architect. Angular, React, TypeScript specialist."
+    />
 
-    <link href="https://fonts.googleapis.com/css?family=Raleway:200,700" rel="stylesheet">
-    <style>
-        /* @font-face kit by Fonts2u (http://www.fonts2u.com) */
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:site" content="@avol_io" />
+    <meta
+      name="twitter:title"
+      content="Alessandro Avolio — Frontend Architect"
+    />
+    <meta
+      name="twitter:description"
+      content="Software Engineer and Frontend Architect. Angular, React, TypeScript specialist."
+    />
 
-        @font-face {
-            font-family: "Beon-Medium";
-            src: url("Beon.eot?") format("eot"), url("Beon.woff") format("woff"), url("Beon.ttf") format("truetype"), url("Beon.svg#Beon-Medium") format("svg");
-            font-weight: normal;
-            font-style: normal;
-        }
-
-        body {
-            transform: rotate3d(0, 0, 0);
-            background: white;
-            color: black;
-            font-family: 'Raleway', sans-serif;
-            font-size: 16px;
-            width: 100vw;
-            overflow: hidden;
-            /*text-align: center;
-            vertical-align: middle;*/
-        }
-
-        main {
-            margin: 10vh 10vw;
-        }
-
-        #first {
-            font-size: 10em;
-            font-weight: 700;
-            margin: 0;
-            width: 100vw;
-            /* overflow: hidden; */
-            /*margin-left: -0.2em;*/
-        }
-
-        #second {
-            font-size: 4em;
-            font-weight: 500;
-            margin: 0;
-            /* margin-top: -0.2em;
-            margin-left: 1.3em; */
-            /*display: inline-block !important;*/
-            /* width: 90vw; */
-            line-height: 80%;
-        }
-
-        #three {
-            font-weight: 100;
-            /* display: inline !important; */
-            opacity: 0;
-            transition: 3s linear opacity;
-            font-size: 1rem;
-            /* margin-top: -2.5em;
-            margin-left: 24.3em; */
-            width: 250px;
-            text-align: right;
-            line-height: initial;
-        }
-
-
-
-        button {
-            font-family: 'Raleway', sans-serif;
-            border: 1px solid black;
-            background: white;
-            margin: auto;
-            /* margin-top: 5em; */
-            color: black;
-            padding: 1em;
-            width: 5em;
-            font-weight: 200;
-            display: block;
-            transition: 0.25s linear all;
-            -moz-user-select: none;
-            /* Firefox */
-            -ms-user-select: none;
-            /* Internet Explorer/Edge */
-            user-select: none;
-        }
-
-        button:hover {
-            background: black;
-            color: white;
-        }
-
-        *:focus {
-            outline: 0 !important;
-        }
-
-        #aMessageForYou span {
-            display: block;
-            text-align: center;
-            animation-fill-mode: both;
-            animation-duration: 1s;
-            min-height: 2em;
-            margin: 0 10vw;
-        }
-
-
-
-        @keyframes fadeOutUp {
-            from {
-                opacity: 1;
-            }
-
-            to {
-                opacity: 0;
-                transform: translate3d(0, -100%, 0);
-            }
-        }
-
-
-        .fadeOutUp {
-            animation-duration: 1s;
-            animation-name: fadeOutUp;
-        }
-
-        .swithLight {
-            animation: neon1 1.5s ease-in-out infinite alternate;
-        }
-
-        @keyframes neon1 {
-            from {
-                text-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #fff, 0 0 40px #FF1177, 0 0 70px #FF1177, 0 0 80px #FF1177, 0 0 100px #FF1177, 0 0 150px #FF1177;
-            }
-            to {
-                text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #fff, 0 0 20px #FF1177, 0 0 35px #FF1177, 0 0 40px #FF1177, 0 0 50px #FF1177, 0 0 75px #FF1177;
-            }
-        }
-
-        @media (max-width: 650px) {
-            #first,
-            #second,
-            #three {
-                display: inline !important;
-                margin: 0;
-            }
-            #first {
-                font-size: 30vw;
-                /*line-height:50%;*/
-            }
-            #second {
-                font-size: 10vw;
-                /*line-height: 70%;*/
-            }
-            #three {}
-        }
-
-        br, body.blackout {
-            color: white;
-            background: black;
-            font-family: 'Beon-Medium', sans-serif;
-        }
-
-        body.blackout button {
-            background: transparent;
-            color:#444;
-            border-color:#222; 
-            width:auto
-        }
-    </style>
-</head>
-
-<body>
-    <main>
-        <div id="first">Sorry,</div>
-        <div id="second">I have no time to make a better site.
-            <!-- <div id="three">In any case here there is everything about me and my abilities. </div> -->
-        </div>
-
-        <!-- <div id="four">Thanks for visiting ; -)</div> -->
-        <br/>
-    </main>
-    <p id="aMessageForYou">
-        <span id="old"></span>
-        <span id="new"></span>
-    </p>
-    <button id="mySuperMegaYeahButton">Enter</button>
-    <script>
-        if(navigator.serviceWorker){navigator.serviceWorker.register('service-worker.js')};
-
-        var abutton = document.getElementById('mySuperMegaYeahButton');
-        var aMessageForYou_old = document.getElementById('old');
-        var aMessageForYou_new = document.getElementById('new');
-        var pointOfStory = 0;
-        var step = 1;
-        var blaBlaBlaAboutMe = [
-            "Really, I have no time to make a better site.",
-            "That's all.",
-            "It's true! This is is everything you need to know about me and my skills.",
-            "Thanks for believing there is something else other than this page. Really that's all.",
-            "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-            "11",
-            "Wow! You sure like a lot pressing a button, don't you?",
-            "Ah I see...it's because there's 'Enter' written on it",
-            "Okay you have a compulsive button pressing problem...Then I shift it.",
-            "Okay, stop or I'll turn off the lights", 
-            //17
-            "Bye!", "Damn it!", "Still here?",
-            "Look behind you, a Three-Headed Monkey!", "Where?",
-            "If you didn't close your browser to go play Monkey Island after this, I might start questioning your tastes.",
-            "Ok, really the game is over.",
-            "Listen...I would like to keep playing with you but if I had more time I would have made a better site.",
-            "Oh okay, if you have nothing better to do then maybe you may spend some time to follow me on Twitter",
-            "You're back...There was no need to come back here.",
-            "Okay I feel we can start the first button-man friendship.",
-            "Did you know you've been on this page for more time than it would've taken to read my CV?",
-            "Okay seriously if you're still here then you are wasting energy you could've used to find what's invisible to your eyes",
-            "Let's start again!"
+    <!-- JSON-LD Person Schema -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "name": "Alessandro Avolio",
+        "givenName": "Alessandro",
+        "familyName": "Avolio",
+        "url": "https://avol.io/",
+        "jobTitle": "Frontend Architect",
+        "description": "Software Engineer and Frontend Architect specializing in Angular, React and TypeScript.",
+        "nationality": "Italian",
+        "sameAs": [
+          "https://www.linkedin.com/in/alessandro-avolio-baa39765/",
+          "https://twitter.com/avol_io"
+        ],
+        "knowsAbout": [
+          "Angular",
+          "Micro Frontend",
+          "React",
+          "TypeScript",
+          "JavaScript",
+          "CSS",
+          "SCSS",
+          "Node.js",
+          "Spring Boot",
+          "Progressive Web Apps",
+          "Agile"
         ]
-        abutton.onclick = function () {
-            thereWasOnce[step++]();
-        }
-
-        var thereWasOnce = [];
-        thereWasOnce[1] = thereWasOnce[2] = thereWasOnce[3] = thereWasOnce[4] = thereWasOnce[5] = thereWasOnce[6] =
-            thereWasOnce[7] = thereWasOnce[8] = thereWasOnce[9] = thereWasOnce[10] = thereWasOnce[11] = thereWasOnce[12] =
-            thereWasOnce[13] = thereWasOnce[14] = thereWasOnce[15] = thereWasOnce[16] = thereWasOnce[17] = thereWasOnce[
-                22] = thereWasOnce[23] = thereWasOnce[24] = thereWasOnce[25] =
-            thereWasOnce[26] = thereWasOnce[27] = thereWasOnce[28] = thereWasOnce[30] = thereWasOnce[31] = thereWasOnce[
-                32] = thereWasOnce[33] = function (
-                point) {
-                // console.log('step:'+step,'pointOfStory'+pointOfStory);
-                changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-
-            }
-
-
-        // thereWasOnce[0] = function () {
-        //     document.getElementById('three').style.opacity = 1;
-        // }
-
-        thereWasOnce[17] = function () {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            abutton.textContent = "Don't touch me";
-        }
-        thereWasOnce[18] = function (x, y) {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            abutton.style.transition = '0.6s cubic-bezier(0.22, 0.61, 0.36, 1) all';
-            abutton.style.margin = 0;
-            abutton.style.transform = "translateX(calc(100vw - 100px))";
-            abutton.onmouseover = function () {
-                thereWasOnce[step++]();
-            }
-        }
-        thereWasOnce[19] = function () {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            abutton.style.transform = 'translateX(calc(40vw - 100px)) translateY(-200px)  rotateZ(35deg)';
-
-
-        }
-        thereWasOnce[20] = function () {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            abutton.textContent = "You don't see me more.. ahhaha!";
-            abutton.style="";
-            document.getElementsByTagName('body')[0].className = "blackout";
-            document.getElementById('first').className = "swithLight";
-            // document.getElementsByTagName('h1')[0].style="font-family: Monoton";
-            document.getElementById('second').style = " animation: neon1 0.8s ease-in-out infinite alternate;"
-            abutton.onmouseover = undefined;
-
-        }
-        thereWasOnce[21] = function () {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            abutton.style = "";
-            abutton.textContent = "A button";
-
-            document.getElementsByTagName('body')[0].className = "";
-            document.getElementById('first').className = "";
-            // document.getElementsByTagName('h1')[0].style="font-family: Monoton";
-            document.getElementById('second').style = ""
-
-        }
-
-        function changeWord(string) {
-            aMessageForYou_old.className = "";
-            setTimeout(function () {
-                aMessageForYou_old.textContent = aMessageForYou_new.textContent;
-                aMessageForYou_new.textContent = string;
-                aMessageForYou_old.className = "fadeOutUp";
-            }, 10);
-        }
-
-        thereWasOnce[24] = function () {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-             Notification.requestPermission(function (result) {
-                    if (result === 'granted') {
-                        navigator.serviceWorker.ready.then(function (registration) {
-                            registration.showNotification('Here!!', {
-                                body: 'Here!!',
-                                icon: 'icon.jpeg',
-                                image:'icon.jpeg',
-                                vibrate: [1000,500,1000,500,1000],
-                                tag: 'vibration-sample',
-                                badge: 'icon.jpeg'
-                            });
-                        });
-                    }
-                }).catch(function (){
-                    alert('No monkey if you not allow notification');
-                });
-            
-        }
-
-        thereWasOnce[29] = function () {
-            changeWord(blaBlaBlaAboutMe[pointOfStory++]);
-            window.open("https://twitter.com/avol_io", '_blank', 'location=yes');
-        }
-
-        thereWasOnce[34] = function () {
-            pointOfStory = 0;
-            step = 1;
-
-        }
-
-        setTimeout(function () {
-            alert('Uh! you are still here.. thank you!');
-        }, 1000 * 60 * 5);
+      }
     </script>
-<!-- Global site tag (gtag.js) - Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=UA-110136901-1"></script>
-<script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag() {dataLayer.push(arguments);}
-    gtag('js', new Date()); gtag('config', 'UA-110136901-1');
-</script>
 
-</body>
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon.jpeg" type="image/jpeg" />
+    <link rel="apple-touch-icon" href="/icon.jpeg" />
 
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Raleway:wght@200;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        background: white;
+        color: black;
+        font-family: "Raleway", sans-serif;
+        font-size: 16px;
+        width: 100vw;
+        overflow: hidden;
+        margin: 0;
+      }
+
+      main {
+        margin: 10vh 10vw;
+      }
+
+      #first {
+        font-size: 10em;
+        font-weight: 700;
+        margin: 0;
+      }
+
+      #second {
+        font-size: 4em;
+        font-weight: 500;
+        margin: 0;
+        line-height: 80%;
+      }
+
+      #three {
+        font-weight: 100;
+        opacity: 0;
+        transition: opacity 3s linear;
+        font-size: 1rem;
+        width: 250px;
+        text-align: right;
+        line-height: initial;
+      }
+
+      button {
+        font-family: "Raleway", sans-serif;
+        border: 1px solid black;
+        background: white;
+        margin: auto;
+        color: black;
+        padding: 1em;
+        width: 5em;
+        font-weight: 200;
+        display: block;
+        transition: all 0.25s linear;
+        user-select: none;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: black;
+        color: white;
+      }
+
+      *:focus-visible {
+        outline: 2px solid #ff1177;
+        outline-offset: 2px;
+      }
+
+      #aMessageForYou span {
+        display: block;
+        text-align: center;
+        animation-fill-mode: both;
+        animation-duration: 1s;
+        min-height: 2em;
+        margin: 0 10vw;
+      }
+
+      @keyframes fadeOutUp {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0;
+          transform: translate3d(0, -100%, 0);
+        }
+      }
+
+      .fadeOutUp {
+        animation-duration: 1s;
+        animation-name: fadeOutUp;
+      }
+.swithLight {
+    animation: neon1 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes neon1 {
+    from {
+        filter:
+            drop-shadow(0 0 6px #fff)
+            drop-shadow(0 0 15px #FF1177)
+            drop-shadow(0 0 40px #FF1177);
+    }
+    to {
+        filter:
+            drop-shadow(0 0 3px #fff)
+            drop-shadow(0 0 8px #FF1177)
+            drop-shadow(0 0 20px #FF1177);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .swithLight {
+        animation: none;
+        filter: drop-shadow(0 0 10px #FF1177);
+    }
+}
+
+      @media (max-width: 650px) {
+        #first,
+        #second,
+        #three {
+          display: inline !important;
+          margin: 0;
+        }
+        #first {
+          font-size: 30vw;
+        }
+        #second {
+          font-size: 10vw;
+        }
+      }
+
+      body.blackout {
+        color: white;
+        background: black;
+        font-family: "Beon-Medium", sans-serif;
+      }
+
+      body.blackout button {
+        background: transparent;
+        color: #444;
+        border-color: #222;
+        width: auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <main>
+      <div id="first">Sorry,</div>
+      <div id="second">I have no time to make a better site.</div>
+      <br />
+    </main>
+
+    <p id="aMessageForYou">
+      <span id="old"></span>
+      <span id="new"></span>
+    </p>
+
+    <button id="mySuperMegaYeahButton" type="button">Enter</button>
+
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/service-worker.js");
+      }
+      let beonLoaded = false;
+
+      function loadBeonFont() {
+        if (beonLoaded) return;
+        beonLoaded = true;
+        const style = document.createElement("style");
+        style.textContent = `
+            @font-face {
+                font-family: "Beon-Medium";
+                src: url("Beon.woff2") format("woff2"),
+                    url("Beon.woff") format("woff");
+                font-weight: normal;
+                font-style: normal;
+                font-display: swap;
+            }
+        `;
+        document.head.appendChild(style);
+      }
+
+      const abutton = document.getElementById("mySuperMegaYeahButton");
+      const msgOld = document.getElementById("old");
+      const msgNew = document.getElementById("new");
+
+      let step = 1;
+
+      const blaBlaBlaAboutMe = [
+        "Really, I have no time to make a better site.", // 0
+        "That's all.", // 1
+        "It's true! This is everything you need to know about me and my skills.", // 2
+        "Thanks for believing there is something else. Really that's all.", // 3
+        "1",
+        "2",
+        "3",
+        "4", // 4-7  (era 4-14, rimossi "5".."11")
+        "Wow! You sure like a lot pressing a button, don't you?", // 8
+        "Ah I see... it's because there's 'Enter' written on it", // 9
+        "Okay you have a compulsive button pressing problem... Then I shift it.", // 10
+        "Okay, stop or I'll turn off the lights", // 11
+        "Bye!", // 12
+        "Damn it!", // 13
+        "Still here?", // 14
+        "Look behind you, a Three-Headed Monkey!", // 15
+        "Where?", // 16
+        "If you didn't close your browser to go play Monkey Island after this, I might start questioning your tastes.", // 17
+        "Ok, really the game is over.", // 18
+        "Listen... I would like to keep playing with you but if I had more time I would have made a better site.", // 19
+        "Oh okay, if you have nothing better to do then maybe you may spend some time to connect with me on LinkedIn", // 20
+        "You're back... There was no need to come back here.", // 21
+        "Okay I feel we can start the first button-man friendship.", // 22
+        "Did you know you've been on this page for more time than it would've taken to read my CV?", // 23
+        "Okay seriously if you're still here then you are wasting energy you could've used to find what's invisible to your eyes", // 24
+        "Let's start again!", // 25
+      ];
+
+      let pointOfStory = 0;
+
+      function changeWord(text) {
+        msgOld.className = "";
+        setTimeout(() => {
+          msgOld.textContent = msgNew.textContent;
+          msgNew.textContent = text;
+          msgOld.className = "fadeOutUp";
+        }, 10);
+      }
+
+      function defaultStep() {
+        changeWord(blaBlaBlaAboutMe[pointOfStory++]);
+      }
+
+      function openCenteredPopup(url, title, w, h) {
+        const left = (screen.width - w) / 2 + (screen.availLeft ?? 0);
+        const top = (screen.height - h) / 2 + (screen.availTop ?? 0);
+        window.open(
+          url,
+          title,
+          `width=${w},height=${h},top=${top},left=${left},resizable=yes,scrollbars=yes`,
+        );
+      }
+
+      const steps = {};
+
+      // Default: 1-9 (intro + "1","2","3","4" + "Wow!") e tutti i passi normali
+      [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26,
+      ].forEach((i) => {
+        steps[i] = defaultStep;
+      });
+
+      steps[10] = () => {
+        defaultStep();
+        abutton.textContent = "Don't touch me";
+        loadBeonFont();
+      };
+
+      steps[11] = () => {
+        defaultStep();
+        abutton.style.transition = "0.6s cubic-bezier(0.22, 0.61, 0.36, 1) all";
+        abutton.style.margin = "0";
+        abutton.style.transform = "translateX(calc(100vw - 100px))";
+        abutton.onmouseover = () => (steps[step++] ?? defaultStep)();
+      };
+
+      steps[12] = () => {
+        defaultStep();
+        abutton.style.transform =
+          "translateX(calc(40vw - 100px)) translateY(-200px) rotateZ(35deg)";
+      };
+
+      steps[13] = () => {
+        defaultStep();
+        abutton.textContent = "You don't see me... ahhaha!";
+        abutton.removeAttribute("style");
+        document.body.className = "blackout";
+        document.getElementById("first").className = "swithLight";
+        document.getElementById("second").style.animation =
+          "neon1 0.8s ease-in-out infinite alternate";
+        abutton.onmouseover = null;
+      };
+
+      steps[14] = () => {
+        defaultStep();
+        abutton.removeAttribute("style");
+        abutton.textContent = "A button";
+        document.body.className = "";
+        document.getElementById("first").className = "";
+        document.getElementById("second").removeAttribute("style");
+        if (Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      };
+
+      steps[17] = () => {
+        defaultStep();
+        if (Notification.permission === "granted") {
+          navigator.serviceWorker.ready.then((reg) => {
+            reg.showNotification("Here!!", {
+              body: "Here!!",
+              icon: "/icon.jpeg",
+              image: "/icon.jpeg",
+              vibrate: [1000, 500, 1000, 500, 1000],
+              tag: "vibration-sample",
+              badge: "/icon.jpeg",
+            });
+          });
+        } else {
+          alert("No monkey if you do not allow notifications");
+        }
+      };
+
+      steps[22] = () => {
+        defaultStep();
+        openCenteredPopup(
+          "https://www.linkedin.com/in/alessandro-avolio-baa39765/",
+          "LinkedIn",
+          800,
+          600,
+        );
+      };
+
+      steps[27] = () => {
+        pointOfStory = 0;
+        step = 1;
+      };
+
+      abutton.addEventListener("click", () => {
+        const used = step++;
+        (steps[used] ?? defaultStep)();
+      });
+    </script>
+  </body>
 </html>
