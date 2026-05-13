@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,37 +16,31 @@
 
   /*
    * DIV A — full-viewport fixed container.
-   * Snaps to 0/90/180/270° to match device orientation.
-   * All interactive children (canvas, obstacles) live here.
+   * snapAngle updated only on OS-level orientation change (ResizeObserver h/w flip).
+   * No CSS transition — snap is instant (OS already animated the rotation).
+   * All physics children (canvas, obstacles) live in this coordinate frame.
    */
   #div-a {
     position: fixed;
     inset: 0;
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /*
    * DIV B — purely decorative rotating rectangle, child of div-a.
    * Rotates continuously at relAngle = deviceAngle - snapAngle.
-   * Scaled so its edges are always exactly 20px inside div-a on every side.
+   * Natural size = div-a minus 40px each axis (20px gap per side).
+   * JS coverScale keeps it fitting inside div-a as it rotates.
    * No physics involvement — pointer-events disabled.
    */
   #div-b {
     position: absolute;
     top: 50%; left: 50%;
     translate: -50% -50%;
-    /* Natural size = div-a minus 40px each axis (20px per side).
-       JS coverScale then ensures it always fills div-a - 20px gap when rotated. */
     width: calc(100% - 40px);
     height: calc(100% - 40px);
     border: 2px solid rgba(255,255,255,0.15);
     border-radius: 16px;
     transform-origin: center center;
-     color:white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 100px;
     pointer-events: none;
   }
 
@@ -82,11 +77,11 @@
     left: 50%;
     transform: translateX(-50%);
     font-size: 28px;
-    color:white;
+    color: white;
+    opacity: 0.25;
     user-select: none;
     pointer-events: none;
     z-index: 30;
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* iOS permission overlay */
@@ -117,10 +112,7 @@
   }
   #permission-overlay.hidden { display: none; }
 
-  /*
-   * Debug panel — extended for diagnostics.
-   * Shows raw sensor values, projected gravity, snap state.
-   */
+  /* Debug panel */
   #debug-info {
     position: fixed;
     top: 8px; left: 8px;
@@ -143,26 +135,9 @@
   <button id="permission-btn">Enable Motion</button>
 </div>
 
-<!--
-  DIV A — snapped coordinate frame (0/90/180/270°).
-  Everything that participates in physics lives here.
--->
 <div id="div-a">
-
-  <!--
-    DIV B — decorative only, rotates continuously inside div-a.
-    Purely visual — no physics interaction.
-  -->
-  <div id="div-b">↓</div>
-
-  <!-- Ball physics rendered here — coordinate space = div-a -->
+  <div id="div-b"></div>
   <canvas id="ball-canvas"></canvas>
-
-  <!--
-    OBSTACLES LAYER — DOM elements here act as physics obstacles.
-    They are axis-aligned in div-a space (snap with div-a, not div-b).
-    Add .obstacle children to define collidable areas.
-  -->
   <div id="obstacles-layer">
     <!-- Demo obstacle — remove or replace -->
     <div class="obstacle" style="
@@ -172,8 +147,6 @@
       border-radius:6px;
     "></div>
   </div>
-
-  <!-- Arrow that counter-rotates inside div-a to always point world-down -->
   <div id="gravity-arrow-a">↓</div>
 </div>
 
@@ -184,44 +157,51 @@
   'use strict';
 
   // ─── Physics constants ───────────────────────────────────────────────────────
-  const BALL_RADIUS       = 18;
-  const RESTITUTION       = 0.72;
-  const FRICTION          = 0.985;
-  const DAMPING           = 0.999;
-  const GRAVITY_STRENGTH  = 0.0035;
-  const WIN_ACCEL_SCALE   = 0.18;
-  const WIN_LOWPASS       = 0.12;
-  const MAX_WIN_DELTA     = 40;
-
-  // ─── Snap constants ──────────────────────────────────────────────────────────
-  const SNAP_ENTER_DEG    = 80;
-  const SNAP_HYSTERESIS   = 12;
+  const BALL_RADIUS      = 18;
+  const RESTITUTION      = 0.72;   // energy retained on bounce
+  const FRICTION         = 0.985;  // tangential damping on wall contact
+  const DAMPING          = 0.999;  // per-frame air resistance
+  const GRAVITY_STRENGTH = 0.0035; // base gravity scale
+  const WIN_ACCEL_SCALE  = 0.18;   // window movement → gravity multiplier (desktop)
+  const WIN_LOWPASS      = 0.12;   // smoothing factor for window velocity
+  const MAX_WIN_DELTA    = 40;     // px clamp for window position delta
 
   // ─── DOM refs ───────────────────────────────────────────────────────────────
-  const divA      = document.getElementById('div-a');
-  const divB      = document.getElementById('div-b');
-  const canvas    = document.getElementById('ball-canvas');
-  const ctx       = canvas.getContext('2d');
-  const overlay   = document.getElementById('permission-overlay');
-  const permBtn   = document.getElementById('permission-btn');
-  const debugEl   = document.getElementById('debug-info');
-  const arrowA    = document.getElementById('gravity-arrow-a');
+  const divA    = document.getElementById('div-a');
+  const divB    = document.getElementById('div-b');
+  const canvas  = document.getElementById('ball-canvas');
+  const ctx     = canvas.getContext('2d');
+  const overlay = document.getElementById('permission-overlay');
+  const permBtn = document.getElementById('permission-btn');
+  const debugEl = document.getElementById('debug-info');
+  const arrowA  = document.getElementById('gravity-arrow-a');
 
   // ─── World dimensions ────────────────────────────────────────────────────────
   let canvasW = 0, canvasH = 0;
 
-  // ─── Gravity in div-a space (px/ms²) ────────────────────────────────────────
+  // ─── Gravity vector in div-a coordinate frame (px/ms²) ──────────────────────
   const gravity = { x: 0, y: GRAVITY_STRENGTH };
 
   // ─── Ball state ──────────────────────────────────────────────────────────────
   const ball = { x: 0, y: 0, vx: 0, vy: 0, radius: BALL_RADIUS };
 
-  // ─── Orientation state ───────────────────────────────────────────────────────
-  let rawBeta     = 0;   // raw beta from sensor (degrees)
-  let rawGamma    = 0;   // raw gamma from sensor (degrees)
-  let deviceAngle = 0;   // angle used for snap logic (= gamma)
-  let snapAngle   = 0;   // current div-a snap: 0 / 90 / 180 / 270
+  // ─── Sensor state ────────────────────────────────────────────────────────────
+  let rawBeta     = 0;   // beta from deviceorientation (degrees)
+  let rawGamma    = 0;   // gamma from deviceorientation (degrees)
+  let deviceAngle = 0;   // gamma, used for div-b continuous rotation
+  let snapAngle   = 0;   // current div-a orientation: 0 / 90 / 180 / 270
   let usingGyro   = false;
+
+  // ─── 180° flip detection ─────────────────────────────────────────────────────
+  // Tracks whether the device is "beta-positive" (normal portrait / normal landscape)
+  // vs "beta-negative" (upside-down portrait / upside-down landscape).
+  // A sign flip while h/w ratio is unchanged signals a 180° rotation.
+  let lastBetaPositive = true; // true = beta >= 0
+
+  // ─── Orientation tracking for resize-based snap ──────────────────────────────
+  // We detect OS-level orientation changes by watching when div-a's h/w ratio
+  // flips (portrait ↔ landscape). At that moment rawGamma tells us the direction.
+  let isPortrait = window.innerHeight > window.innerWidth;
 
   // ─── Desktop window movement state ──────────────────────────────────────────
   let prevScreenX = window.screenX;
@@ -234,9 +214,7 @@
 
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  DEBUG PANEL
-  //  Updated every frame with raw sensor data + computed state.
-  //  Remove or comment out updateDebug() call in loop() for production.
+  //  DEBUG PANEL — remove updateDebug() call in loop() for production
   // ═══════════════════════════════════════════════════════════════════════════
   function updateDebug() {
     debugEl.innerHTML =
@@ -247,15 +225,60 @@
       `gravity.x: ${gravity.x.toFixed(5)}<br>` +
       `gravity.y: ${gravity.y.toFixed(5)}<br>` +
       `ball vx: ${ball.vx.toFixed(2)} vy: ${ball.vy.toFixed(2)}<br>` +
-      `source: ${usingGyro ? '● gyro' : '○ window'}`+`<br> versione 3` ;
+      `source: ${usingGyro ? '● gyro' : '○ window'}<br>` +
+      `v4`;
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SNAP APPLICATION
+  //  Called only on OS-level orientation events (resize h/w flip or 180° beta flip).
+  //  No CSS transition on div-a — OS already animated the screen rotation.
+  //
+  //  On snap:
+  //  1. Ball velocity is counter-rotated by -delta so trajectory feels continuous.
+  //  2. Ball position is rotated around canvas center so it stays at the same
+  //     world location (e.g. 10px from corner A before snap = 10px after).
+  //  3. div-a CSS transform updated instantly.
+  //  4. Gravity arrow counter-rotated to always point world-down.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function applySnapAngle(newSnap) {
+    // Normalize to 0–359
+    newSnap = ((newSnap % 360) + 360) % 360;
+    if (newSnap === snapAngle) return;
+
+    const delta = newSnap - snapAngle;
+    const rad   = -delta * Math.PI / 180;
+    const cos   = Math.cos(rad);
+    const sin   = Math.sin(rad);
+
+    // Counter-rotate velocity — ball continues its physical trajectory
+    const newVx = ball.vx * cos - ball.vy * sin;
+    const newVy = ball.vx * sin + ball.vy * cos;
+    ball.vx = newVx;
+    ball.vy = newVy;
+
+    // Rotate position around canvas center — ball stays at same world location
+    const cx = canvasW / 2;
+    const cy = canvasH / 2;
+    const px = ball.x - cx;
+    const py = ball.y - cy;
+    ball.x = px * cos - py * sin + cx;
+    ball.y = px * sin + py * cos + cy;
+
+    snapAngle = newSnap;
+
+    // Instant snap — no transition (OS already handled the animation)
+    divA.style.transform   = `rotate(${snapAngle}deg)`;
+    arrowA.style.transform = `translateX(-50%) rotate(${-snapAngle}deg)`;
   }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  CANVAS RESIZE
-  //  Uses offsetWidth/offsetHeight (layout size, transform-independent).
-  //  getBoundingClientRect() would return post-transform size — wrong on Chrome
-  //  when a CSS transform is already applied at the time of the call.
+  //  Uses offsetWidth/offsetHeight — layout dimensions, transform-independent.
+  //  getBoundingClientRect() returns post-transform size and causes
+  //  browser-specific inconsistencies when a CSS transform is active.
   // ═══════════════════════════════════════════════════════════════════════════
   function resizeCanvas() {
     const w = divA.offsetWidth;
@@ -275,26 +298,41 @@
     ball.y = Math.max(ball.radius, Math.min(canvasH - ball.radius, ball.y || canvasH / 4));
   }
 
-  const ro = new ResizeObserver(resizeCanvas);
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  RESIZE OBSERVER — orientation change detection
+  //
+  //  Portrait ↔ landscape: h/w ratio flips → use rawGamma sign to determine
+  //  rotation direction (+90 or -90).
+  //
+  //  180° flip: h/w ratio unchanged but beta sign inverts → add 180°.
+  //  Detected separately in updateGravityFromOrientation() via lastBetaPositive.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const ro = new ResizeObserver(() => {
+    const nowPortrait = divA.offsetHeight > divA.offsetWidth;
+
+    if (nowPortrait !== isPortrait) {
+      // h/w ratio flipped → 90° rotation occurred.
+      // rawGamma sign at the moment of resize tells us the direction:
+      //   gamma < 0 → rotated counter-clockwise → snapAngle decreases
+      //   gamma > 0 → rotated clockwise         → snapAngle increases
+      const delta = rawGamma < 0 ? -90 : 90;
+      applySnapAngle(snapAngle + delta);
+      isPortrait = nowPortrait;
+    }
+
+    resizeCanvas();
+  });
   ro.observe(divA);
 
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  DIV B TRANSFORM
-  //  div-b rotates at relAngle = deviceAngle - snapAngle (relative to div-a).
-  //  Scaled so its visible boundary sits 20px inside div-a on every side.
-  //
-  //  Strategy: div-b natural size is (divA - 40px) each axis.
-  //  coverScale computes the minimum scale to ensure no gap appears at the
-  //  corners when rotated — but we want the OPPOSITE: we want it to always
-  //  show a 20px gap. So we use fit (min) scale, which keeps it within bounds,
-  //  and the natural size already encodes the 40px reduction.
-  //  When rotated, the bounding box shrinks, so the gap increases slightly —
-  //  this is visually acceptable and avoids the complexity of a dynamic inset.
+  //  div-b rotates continuously at relAngle = deviceAngle - snapAngle.
+  //  Scaled with coverScale (fit/min) so it never overflows div-a.
+  //  The 20px gap is encoded in its natural CSS size (calc(100% - 40px)).
   // ═══════════════════════════════════════════════════════════════════════════
   function coverScale(containerW, containerH, innerW, innerH, angleRad) {
-    // Scale so rotated innerW×innerH always fits inside container (no overflow).
-    // Uses the rotated bounding box formula.
+    // Minimum scale to fit a rotated innerW×innerH rectangle inside the container.
     const a = Math.abs(Math.cos(angleRad));
     const b = Math.abs(Math.sin(angleRad));
     const scaleX = containerW / (innerW * a + innerH * b);
@@ -306,7 +344,6 @@
     const relAngle = deviceAngle - snapAngle;
     const relRad   = relAngle * Math.PI / 180;
 
-    // Layout dimensions — unaffected by CSS transform
     const aW = divA.offsetWidth;
     const aH = divA.offsetHeight;
     const bW = divB.offsetWidth;
@@ -318,110 +355,67 @@
 
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  SNAP LOGIC
-  // ═══════════════════════════════════════════════════════════════════════════
-  function computeSnapAngle(rawAngle, currentSnap) {
-  const norm        = ((rawAngle    % 360) + 360) % 360;
-  const normCurrent = ((currentSnap % 360) + 360) % 360;
-
-  // Distance from current snap — must exceed EXIT threshold before
-  // we even consider switching to another snap target
-  const distFromCurrent = Math.abs(((norm - normCurrent + 540) % 360) - 180);
-  if (distFromCurrent < SNAP_ENTER_DEG) {
-    // Still well within the current snap zone — don't change
-    return currentSnap;
-  }
-
-  // We've left the current snap zone — find the nearest new target
-  let bestSnap = currentSnap;
-  let bestDist = Infinity;
-  for (const snap of [0, 90, 180, 270]) {
-    if (snap === normCurrent) continue;
-    const dist = Math.abs(((norm - snap + 540) % 360) - 180);
-    if (dist < SNAP_ENTER_DEG - SNAP_HYSTERESIS && dist < bestDist) {
-      bestDist = dist;
-      bestSnap = snap;
-    }
-  }
-  return bestSnap;
-}
-
-  function applySnapAngle(newSnap) {
-    if (newSnap === snapAngle) return;
-
-    const delta = newSnap - snapAngle;
-    const rad   = -delta * Math.PI / 180;
-    const cos   = Math.cos(rad);
-    const sin   = Math.sin(rad);
-
-    // Counter-rotate velocity so ball trajectory feels continuous across snap
-    const newVx = ball.vx * cos - ball.vy * sin;
-    const newVy = ball.vx * sin + ball.vy * cos;
-    ball.vx = newVx;
-    ball.vy = newVy;
-
-    // Rotate position around canvas center so ball stays at same world location
-    const cx = canvasW / 2;
-    const cy = canvasH / 2;
-    const px  = ball.x - cx;
-    const py  = ball.y - cy;
-    ball.x = px * cos - py * sin + cx;
-    ball.y = px * sin + py * cos + cy;
-
-    snapAngle = newSnap;
-
-    divA.style.transform  = `rotate(${snapAngle}deg)`;
-    // Arrow lives inside div-a and must counter-rotate to point world-down
-    arrowA.style.transform = `translateX(-50%) rotate(${-snapAngle}deg)`;
-  }
-
-
-  // ═══════════════════════════════════════════════════════════════════════════
   //  GRAVITY — MOBILE (device orientation)
   //
-  //  In portrait mode, beta ≈ 90° (device nearly vertical).
-  //  We use (beta - 90) as the tilt reference so that:
-  //    - phone perfectly upright portrait → betaOffset = 0 → no Y gravity component
-  //    - tilting top toward user → betaOffset > 0 → ball rolls toward top
-  //    - tilting top away → betaOffset < 0 → ball rolls toward bottom
+  //  Portrait reference: beta=90 is upright. We offset by -90 so:
+  //    betaOffset = 0  → phone perfectly vertical → no spurious Y gravity
+  //    betaOffset > 0  → tilting top toward user
+  //    betaOffset < 0  → tilting top away
   //
-  //  World-frame gravity is then projected into div-a's coordinate frame
-  //  by rotating by -snapAngle, ensuring physical continuity across snaps.
+  //  World-frame gravity is projected into div-a's coordinate frame
+  //  by rotating by -snapAngle. This decouples physics from snap events:
+  //  the ball never "feels" a snap, only real-world gravity direction.
+  //
+  //  180° detection: if beta sign flips while h/w ratio is unchanged
+  //  (isPortrait hasn't changed), the device was flipped upside-down.
   // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromOrientation(beta, gamma) {
     rawBeta     = beta  || 0;
     rawGamma    = gamma || 0;
     deviceAngle = rawGamma;
 
-    // Portrait reference: beta=90 is upright. Offset so 0 = neutral.
+    // ── 180° flip detection ────────────────────────────────────────────────
+    // beta > 0 in normal orientation, beta < 0 when flipped 180°.
+    // We only act on the sign flip — not on continuous beta changes.
+    const betaPositive = rawBeta >= 0;
+    if (betaPositive !== lastBetaPositive) {
+      // Sign changed — 180° flip. Only valid if h/w ratio didn't also change
+      // (if it did, the ResizeObserver already handled it as a 90° snap).
+      const nowPortrait = divA.offsetHeight > divA.offsetWidth;
+      if (nowPortrait === isPortrait) {
+        applySnapAngle(snapAngle + 180);
+      }
+      lastBetaPositive = betaPositive;
+    }
+
+    // ── Gravity projection ─────────────────────────────────────────────────
     const betaOffset = Math.max(-90, Math.min(90, rawBeta - 90));
     const bRad = betaOffset * Math.PI / 180;
     const gRad = Math.max(-90, Math.min(90, rawGamma)) * Math.PI / 180;
 
-    // World-frame gravity (what the physical device experiences)
+    // World-frame gravity vector
     const worldGx =  Math.sin(gRad) * GRAVITY_STRENGTH * 20;
     const worldGy =  Math.sin(bRad) * GRAVITY_STRENGTH * 20;
 
-    // Project into div-a frame by rotating by -snapAngle
+    // Rotate into div-a frame by -snapAngle
     const snapRad = -snapAngle * Math.PI / 180;
     const cos     = Math.cos(snapRad);
     const sin     = Math.sin(snapRad);
     gravity.x = worldGx * cos - worldGy * sin;
     gravity.y = worldGx * sin + worldGy * cos;
 
-    // Minimum gravity when device nearly flat
     if (Math.abs(gravity.x) < 0.0001 && Math.abs(gravity.y) < 0.0001) {
-      gravity.y = GRAVITY_STRENGTH;
+      gravity.y = GRAVITY_STRENGTH; // minimum gravity when device is flat
     }
 
-    const newSnap = computeSnapAngle(deviceAngle, snapAngle);
-    applySnapAngle(newSnap);
     updateDivBTransform();
   }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  GRAVITY — DESKTOP (window movement)
+  //  GRAVITY — DESKTOP (window movement fallback)
+  //  Simulates gravity by tracking browser window position on screen.
+  //  Moving window right → ball feels pull to the right, etc.
   // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromWindow() {
     const dx = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenX - prevScreenX));
@@ -439,6 +433,7 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  DEVICE ORIENTATION SETUP
+  //  iOS 13+ requires explicit user permission for DeviceOrientationEvent.
   // ═══════════════════════════════════════════════════════════════════════════
   function startOrientation() {
     window.addEventListener('deviceorientation', (e) => {
@@ -474,25 +469,29 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  OBSTACLES
+  //  DOM elements inside #obstacles-layer, axis-aligned in div-a space.
+  //  Positions read via getBoundingClientRect relative to canvas rect.
+  //  canvas has no own transform, so the subtraction correctly maps
+  //  screen-space obstacle positions into canvas (div-a) coordinates.
   // ═══════════════════════════════════════════════════════════════════════════
   function addObstacle(cssSelector) {
     if (!obstacleSelectors.includes(cssSelector)) obstacleSelectors.push(cssSelector);
   }
 
   function refreshObstacles() {
-    const canvasRect = canvas.getBoundingClientRect();
+    const cr = canvas.getBoundingClientRect();
     obstacleRects = [];
 
     for (const sel of obstacleSelectors) {
       document.querySelectorAll(sel).forEach(el => {
         const r = el.getBoundingClientRect();
-        obstacleRects.push({ x: r.left - canvasRect.left, y: r.top - canvasRect.top, w: r.width, h: r.height });
+        obstacleRects.push({ x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
       });
     }
 
     document.querySelectorAll('.obstacle').forEach(el => {
       const r = el.getBoundingClientRect();
-      obstacleRects.push({ x: r.left - canvasRect.left, y: r.top - canvasRect.top, w: r.width, h: r.height });
+      obstacleRects.push({ x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
     });
   }
 
@@ -502,9 +501,9 @@
   // ═══════════════════════════════════════════════════════════════════════════
   function resolveWallCollision() {
     const r = ball.radius;
-    if (ball.x - r < 0)       { ball.x = r;          ball.vx =  Math.abs(ball.vx) * RESTITUTION; }
-    if (ball.x + r > canvasW) { ball.x = canvasW - r; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
-    if (ball.y - r < 0)       { ball.y = r;           ball.vy =  Math.abs(ball.vy) * RESTITUTION; }
+    if (ball.x - r < 0)       { ball.x = r;           ball.vx =  Math.abs(ball.vx) * RESTITUTION; }
+    if (ball.x + r > canvasW) { ball.x = canvasW - r;  ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+    if (ball.y - r < 0)       { ball.y = r;            ball.vy =  Math.abs(ball.vy) * RESTITUTION; }
     if (ball.y + r > canvasH) {
       ball.y  = canvasH - r;
       ball.vy = -Math.abs(ball.vy) * RESTITUTION;
@@ -514,6 +513,7 @@
 
   function resolveObstacleCollisions() {
     for (const obs of obstacleRects) {
+      // Closest point on AABB to ball center
       const cx   = Math.max(obs.x, Math.min(ball.x, obs.x + obs.w));
       const cy   = Math.max(obs.y, Math.min(ball.y, obs.y + obs.h));
       const dx   = ball.x - cx;
@@ -538,13 +538,17 @@
   }
 
   function updatePhysics(dt) {
+    // Cap dt to avoid spiral-of-death when tab resumes from background
     const safeDt = Math.min(dt, 32);
+
+    // Symplectic Euler: velocity first, then position (more stable than explicit)
     ball.vx += gravity.x * safeDt;
     ball.vy += gravity.y * safeDt;
     ball.vx *= DAMPING;
     ball.vy *= DAMPING;
     ball.x  += ball.vx * safeDt;
     ball.y  += ball.vy * safeDt;
+
     resolveWallCollision();
     resolveObstacleCollisions();
   }
@@ -576,7 +580,7 @@
     ctx.fill();
     ctx.restore();
 
-    // Obstacle debug outlines
+    // Obstacle debug outlines — remove in production
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth   = 1;
@@ -597,7 +601,7 @@
     lastTime  = timestamp;
 
     if (!usingGyro) updateGravityFromWindow();
-    if (frameCount % 10 === 0) refreshObstacles();
+    if (frameCount % 10 === 0) refreshObstacles(); // cheap enough, handles layout shifts
     frameCount++;
 
     updatePhysics(dt);
@@ -620,6 +624,7 @@
     requestAnimationFrame(loop);
   }
 
+  // Small delay so ResizeObserver fires at least once before reading dimensions
   setTimeout(init, 50);
 
 
@@ -627,8 +632,8 @@
   //  PUBLIC API
   // ═══════════════════════════════════════════════════════════════════════════
   window.physicsApp = {
-    addObstacle,
-    getBall: () => ({ ...ball }),
+    addObstacle,               // physicsApp.addObstacle('#my-element')
+    getBall: () => ({ ...ball }), // read-only snapshot of ball state
   };
 
 })();
