@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physics Ball</title>
+<style>
+  /* Reset — box-sizing border-box everywhere, no default margin/padding */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #0f0f0f;
+  }
+
+  /*
+   * DIV A — full-viewport fixed container.
+   * Snaps to 0/90/180/270° to match device orientation.
+   * All interactive children (canvas, obstacles) live here
+   * and share its coordinate space.
+   */
+  #div-a {
+    position: fixed;
+    inset: 0;
+    /* snap rotation is animated via JS setting transform */
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /*
+   * DIV B — purely decorative rotating rectangle.
+   * Sibling of canvas and obstacles inside div-a.
+   * Rotates continuously + scales to always fill div-a.
+   * Does NOT affect physics — it's visual only.
+   */
+  #div-b {
+    position: absolute;
+    /* centered inside div-a */
+    top: 50%; left: 50%;
+    translate: -50% -50%;
+    width: 80%;
+    height: 80%;
+    border: 2px solid rgba(255,255,255,0.15);
+    border-radius: 16px;
+    /* transform (rotate + scale) set by JS */
+    transform-origin: center center;
+    /* pointer-events off — it's decoration */
+    pointer-events: none;
+  }
+
+  /*
+   * BALL CANVAS — fills div-a completely.
+   * The ball physics live in this coordinate space.
+   * Sits above div-b visually (z-index), below obstacles.
+   */
+  #ball-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 10;
+  }
+
+  /*
+   * OBSTACLES LAYER — same size and position as canvas.
+   * Children are axis-aligned in div-a space (they snap with div-a,
+   * but do NOT follow div-b's continuous rotation).
+   * z-index above canvas so DOM elements render on top.
+   */
+  #obstacles-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  /* Debug gravity arrow — lives in div-a, counter-rotates to always point world-down */
+  #gravity-arrow-a {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 28px;
+    opacity: 0.25;
+    user-select: none;
+    pointer-events: none;
+    z-index: 30;
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* iOS permission request overlay */
+  #permission-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    z-index: 1000;
+    color: white;
+    font-family: system-ui, sans-serif;
+    text-align: center;
+    padding: 24px;
+  }
+  #permission-overlay p { font-size: 16px; opacity: 0.8; max-width: 300px; }
+  #permission-btn {
+    padding: 12px 32px;
+    background: #4f8ef7;
+    color: white;
+    border: none;
+    border-radius: 50px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  #permission-overlay.hidden { display: none; }
+
+  /* Small debug readout — top-left corner */
+  #debug-info {
+    position: fixed;
+    top: 8px; left: 8px;
+    font-family: monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    z-index: 200;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="permission-overlay">
+  <p>This experience needs access to device orientation sensors.</p>
+  <button id="permission-btn">Enable Motion</button>
+</div>
+
+<!--
+  DIV A — snapped coordinate frame (0/90/180/270°).
+  Everything that participates in physics lives here.
+-->
+<div id="div-a">
+
+  <!--
+    DIV B — decorative only, rotates continuously inside div-a.
+    Purely visual — no physics interaction.
+  -->
+  <div id="div-b"></div>
+
+  <!-- Ball physics rendered here — coordinate space = div-a -->
+  <canvas id="ball-canvas"></canvas>
+
+  <!--
+    OBSTACLES LAYER — DOM elements here act as physics obstacles.
+    They are axis-aligned in div-a space (snap with div-a, not div-b).
+    Add .obstacle children to define collidable areas.
+  -->
+  <div id="obstacles-layer">
+    <!-- Demo obstacle — remove or replace as needed -->
+    <div class="obstacle" style="
+      position:absolute; left:20%; top:40%;
+      width:60%; height:12px;
+      background: rgba(255,255,255,0.12);
+      border-radius:6px;
+    "></div>
+  </div>
+
+  <!-- Arrow that counter-rotates inside div-a to always point world-down -->
+  <div id="gravity-arrow-a">↓</div>
+
+</div>
+
+<div id="debug-info"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ─── Physics constants ───────────────────────────────────────────────────────
+  const BALL_RADIUS       = 18;
+  const RESTITUTION       = 0.72;    // energy retained on bounce (0=dead, 1=elastic)
+  const FRICTION          = 0.985;   // tangential velocity multiplier on wall contact
+  const DAMPING           = 0.999;   // per-frame air resistance multiplier
+  const GRAVITY_STRENGTH  = 0.0035;  // base gravity scale — tune this to feel right
+  const WIN_ACCEL_SCALE   = 0.18;    // how strongly window movement affects gravity
+  const WIN_LOWPASS       = 0.12;    // low-pass smoothing for window velocity
+  const MAX_WIN_DELTA     = 40;      // clamp window position delta (px) to avoid spikes
+
+  // ─── Snap / orientation constants ───────────────────────────────────────────
+  const SNAP_ENTER_DEG    = 80;   // degrees from a 90° multiple to trigger snap
+  const SNAP_HYSTERESIS   = 12;   // dead-band to prevent rapid snap flicker
+
+  // ─── DOM references ─────────────────────────────────────────────────────────
+  const divA      = document.getElementById('div-a');
+  const divB      = document.getElementById('div-b');
+  const canvas    = document.getElementById('ball-canvas');
+  const ctx       = canvas.getContext('2d');
+  const overlay   = document.getElementById('permission-overlay');
+  const permBtn   = document.getElementById('permission-btn');
+  const debugInfo = document.getElementById('debug-info');
+  const arrowA    = document.getElementById('gravity-arrow-a');
+
+  // ─── Canvas / world dimensions ──────────────────────────────────────────────
+  // canvasW/H always reflect the logical pixel size of the canvas (= div-a size).
+  // Updated by ResizeObserver whenever div-a changes.
+  let canvasW = 0, canvasH = 0;
+
+  // ─── Gravity vector (canvas/div-a space, pixels per ms²) ────────────────────
+  // This is always expressed in div-a's coordinate frame.
+  // When the device tilts, we project world gravity into div-a space
+  // by subtracting snapAngle from the raw device angle.
+  const gravity = { x: 0, y: GRAVITY_STRENGTH };
+
+  // ─── Ball state ─────────────────────────────────────────────────────────────
+  const ball = {
+    x: 0, y: 0,     // position in canvas (div-a) space
+    vx: 0, vy: 0,   // velocity in canvas space (px/ms)
+    radius: BALL_RADIUS
+  };
+
+  // ─── Orientation / snap state ────────────────────────────────────────────────
+  let deviceAngle   = 0;   // raw continuous angle from gyro (degrees, world frame)
+  let snapAngle     = 0;   // current snapped angle of div-a (0/90/180/270)
+  let usingGyro     = false;
+
+  // ─── Window movement state (desktop fallback) ────────────────────────────────
+  let prevScreenX = window.screenX;
+  let prevScreenY = window.screenY;
+  let winVelX = 0, winVelY = 0;  // smoothed window velocity for gravity simulation
+
+  // ─── Obstacle rects (refreshed every N frames) ──────────────────────────────
+  // Stored as { x, y, w, h } in canvas (div-a) coordinate space.
+  const obstacleSelectors = [];
+  let   obstacleRects     = [];
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CANVAS RESIZE
+  //  Uses div-a's offsetWidth/offsetHeight (layout size, transform-independent)
+  //  so we always get the true viewport size regardless of any CSS transforms.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function resizeCanvas() {
+    // offsetWidth/offsetHeight are layout dimensions — unaffected by CSS transform.
+    // This is the fix vs getBoundingClientRect() which returns post-transform size.
+    const w = divA.offsetWidth;
+    const h = divA.offsetHeight;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
+
+    // Reset the DPR scale — must be re-applied after every canvas resize
+    ctx.scale(dpr, dpr);
+
+    canvasW = w;
+    canvasH = h;
+
+    // Clamp ball inside new bounds so it never starts outside the world
+    ball.x = Math.max(ball.radius, Math.min(canvasW - ball.radius, ball.x || canvasW / 2));
+    ball.y = Math.max(ball.radius, Math.min(canvasH - ball.radius, ball.y || canvasH / 4));
+  }
+
+  // Watch div-a for size changes (orientation change, resize, etc.)
+  const ro = new ResizeObserver(resizeCanvas);
+  ro.observe(divA);
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DIV B TRANSFORM
+  //  div-b rotates continuously relative to div-a.
+  //  It scales to always cover div-a fully (no gaps at corners when rotated).
+  //  relAngle = raw device angle minus the snapped div-a angle.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function coverScale(containerW, containerH, innerW, innerH, angleRad) {
+    // Compute the minimum scale so that a rotated innerW×innerH rectangle
+    // fully covers containerW×containerH without leaving any gaps.
+    const a = Math.abs(Math.cos(angleRad));
+    const b = Math.abs(Math.sin(angleRad));
+    const scaleX = containerW / (innerW * a + innerH * b);
+    const scaleY = containerH / (innerW * b + innerH * a);
+    return Math.min(scaleX, scaleY);
+  }
+
+  function updateDivBTransform() {
+    // The angle div-b rotates *within* div-a's snapped frame
+    const relAngle = deviceAngle - snapAngle;
+    const relRad   = relAngle * Math.PI / 180;
+
+    // Use offsetWidth/offsetHeight for true layout size (see resizeCanvas note)
+    const aW = divA.offsetWidth;
+    const aH = divA.offsetHeight;
+    const bW = divB.offsetWidth;
+    const bH = divB.offsetHeight;
+
+    const scale = coverScale(aW, aH, bW, bH, relRad);
+    divB.style.transform = `rotate(${relAngle}deg) scale(${scale})`;
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SNAP ANGLE LOGIC
+  //  div-a snaps to the nearest 90° multiple when the device angle gets close
+  //  enough. Hysteresis prevents flickering near the threshold.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function computeSnapAngle(rawAngle, currentSnap) {
+    const norm        = ((rawAngle   % 360) + 360) % 360;
+    const normCurrent = ((currentSnap % 360) + 360) % 360;
+
+    for (const snap of [0, 90, 180, 270]) {
+      // Angular distance from raw angle to this snap target
+      const dist = Math.abs(((norm - snap + 540) % 360) - 180);
+      if (snap !== normCurrent && dist < SNAP_ENTER_DEG - SNAP_HYSTERESIS) {
+        return snap;
+      }
+    }
+    return currentSnap;
+  }
+
+  function applySnapAngle(newSnap) {
+    if (newSnap === snapAngle) return;
+
+    // How much the frame is rotating (in degrees, could be ±90 or ±180)
+    const delta = newSnap - snapAngle;
+
+    // ── Rotate ball velocity to stay continuous in the new frame ────────────
+    // When div-a snaps by `delta` degrees, the canvas coordinate system rotates.
+    // We counter-rotate the ball's velocity by the same delta so that the ball
+    // continues its physical trajectory without any perceived jump.
+    // (If the ball was moving toward corner A before the snap, it still moves
+    //  toward corner A after the snap.)
+    const rad = -delta * Math.PI / 180;  // negative = counter-rotate
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const newVx = ball.vx * cos - ball.vy * sin;
+    const newVy = ball.vx * sin + ball.vy * cos;
+    ball.vx = newVx;
+    ball.vy = newVy;
+
+    // Also rotate ball position around the canvas center so it stays at the
+    // same world position (e.g. 10px from corner A before = 10px after snap)
+    const cx = canvasW / 2;
+    const cy = canvasH / 2;
+    const px = ball.x - cx;
+    const py = ball.y - cy;
+    ball.x = px * cos - py * sin + cx;
+    ball.y = px * sin + py * cos + cy;
+
+    snapAngle = newSnap;
+
+    // Rotate div-a to its new snapped orientation
+    divA.style.transform = `rotate(${snapAngle}deg)`;
+
+    // Counter-rotate the gravity arrow so it always points world-down
+    arrowA.style.transform = `translateX(-50%) rotate(${-snapAngle}deg)`;
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  GRAVITY FROM DEVICE ORIENTATION (mobile)
+  //  beta  = front/back tilt (-180..180°)
+  //  gamma = left/right tilt (-90..90°)
+  //
+  //  Gravity is projected into div-a's frame by offsetting by snapAngle.
+  //  This ensures physical continuity: the ball doesn't feel the snap.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function updateGravityFromOrientation(beta, gamma) {
+    const bRad = Math.max(-90, Math.min(90, beta  || 0)) * Math.PI / 180;
+    const gRad = Math.max(-90, Math.min(90, gamma || 0)) * Math.PI / 180;
+
+    // Raw world-frame device angle (used for snap computation)
+    deviceAngle = gamma || 0;
+
+    // World-frame gravity vector (what the device physically feels)
+    const worldGx =  Math.sin(gRad) * GRAVITY_STRENGTH * 20;
+    const worldGy = -Math.sin(bRad) * GRAVITY_STRENGTH * 20;
+
+    // Project world gravity into div-a's coordinate frame by rotating by -snapAngle.
+    // This is the key step: gravity in canvas space must account for how much
+    // div-a has already rotated, so the ball behaves as if the snap never happened.
+    const snapRad = -snapAngle * Math.PI / 180;
+    const cos     = Math.cos(snapRad);
+    const sin     = Math.sin(snapRad);
+    gravity.x = worldGx * cos - worldGy * sin;
+    gravity.y = worldGx * sin + worldGy * cos;
+
+    // Ensure minimum gravity when device is nearly flat
+    if (Math.abs(gravity.x) < 0.0001 && Math.abs(gravity.y) < 0.0001) {
+      gravity.y = GRAVITY_STRENGTH;
+    }
+
+    // Update snap + div-b rotation
+    const newSnap = computeSnapAngle(deviceAngle, snapAngle);
+    applySnapAngle(newSnap);
+    updateDivBTransform();
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  GRAVITY FROM WINDOW MOVEMENT (desktop fallback)
+  //  Simulates gravity by tracking how fast the browser window is being moved.
+  //  Moving the window right = gravity pulls ball right, etc.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function updateGravityFromWindow() {
+    const dx = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenX - prevScreenX));
+    const dy = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenY - prevScreenY));
+    prevScreenX = window.screenX;
+    prevScreenY = window.screenY;
+
+    // Smooth window velocity with a low-pass filter to avoid jitter
+    winVelX = winVelX * (1 - WIN_LOWPASS) + dx * WIN_LOWPASS;
+    winVelY = winVelY * (1 - WIN_LOWPASS) + dy * WIN_LOWPASS;
+
+    // Base gravity is always downward; window movement adds a lateral component
+    gravity.x = winVelX * WIN_ACCEL_SCALE * GRAVITY_STRENGTH * 20;
+    gravity.y = GRAVITY_STRENGTH + winVelY * WIN_ACCEL_SCALE * GRAVITY_STRENGTH * 20;
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DEVICE ORIENTATION SETUP
+  //  iOS 13+ requires an explicit user gesture to grant DeviceOrientation access.
+  //  Other browsers expose it freely.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function startOrientation() {
+    window.addEventListener('deviceorientation', (e) => {
+      if (!usingGyro) {
+        usingGyro = true;
+        debugInfo.textContent = '● gyro';
+      }
+      updateGravityFromOrientation(e.beta, e.gamma);
+    });
+  }
+
+  permBtn.addEventListener('click', async () => {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm === 'granted') {
+          overlay.classList.add('hidden');
+          startOrientation();
+        }
+      } catch(e) {
+        overlay.querySelector('p').textContent = "Permission denied. Tilt won't work.";
+      }
+    } else {
+      overlay.classList.add('hidden');
+      startOrientation();
+    }
+  });
+
+  // Auto-hide overlay on non-iOS (no permission prompt needed)
+  if (typeof DeviceOrientationEvent === 'undefined' ||
+      typeof DeviceOrientationEvent.requestPermission !== 'function') {
+    overlay.classList.add('hidden');
+    startOrientation();
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  OBSTACLE MANAGEMENT
+  //  Obstacles are DOM elements inside #obstacles-layer (div-a space).
+  //  We read their screen positions via getBoundingClientRect and convert
+  //  them into canvas coordinates by subtracting the canvas's own rect.
+  //  Since canvas and obstacles are both children of div-a (same coordinate
+  //  frame, no relative transform between them), this subtraction is exact.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function addObstacle(cssSelector) {
+    if (!obstacleSelectors.includes(cssSelector)) {
+      obstacleSelectors.push(cssSelector);
+    }
+  }
+
+  function refreshObstacles() {
+    // canvas.getBoundingClientRect() gives us the canvas origin in screen space.
+    // Since the canvas has no transform of its own (only div-a rotates),
+    // this correctly accounts for div-a's snap rotation.
+    const canvasRect = canvas.getBoundingClientRect();
+    obstacleRects = [];
+
+    // Registered selectors
+    for (const sel of obstacleSelectors) {
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        const r = el.getBoundingClientRect();
+        obstacleRects.push({
+          x: r.left - canvasRect.left,
+          y: r.top  - canvasRect.top,
+          w: r.width,
+          h: r.height
+        });
+      }
+    }
+
+    // Auto-collect all .obstacle elements from #obstacles-layer
+    const demoEls = document.querySelectorAll('.obstacle');
+    for (const el of demoEls) {
+      const r = el.getBoundingClientRect();
+      obstacleRects.push({
+        x: r.left - canvasRect.left,
+        y: r.top  - canvasRect.top,
+        w: r.width,
+        h: r.height
+      });
+    }
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PHYSICS UPDATE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Bounce off the four canvas edges (= div-a bounds)
+  function resolveWallCollision() {
+    const r = ball.radius;
+
+    if (ball.x - r < 0) {
+      ball.x = r;
+      ball.vx = Math.abs(ball.vx) * RESTITUTION;
+    }
+    if (ball.x + r > canvasW) {
+      ball.x = canvasW - r;
+      ball.vx = -Math.abs(ball.vx) * RESTITUTION;
+    }
+    if (ball.y - r < 0) {
+      ball.y = r;
+      ball.vy = Math.abs(ball.vy) * RESTITUTION;
+    }
+    if (ball.y + r > canvasH) {
+      ball.y = canvasH - r;
+      ball.vy = -Math.abs(ball.vy) * RESTITUTION;
+      ball.vx *= FRICTION;   // rolling friction on the floor
+    }
+  }
+
+  // Circle vs AABB collision resolution for each obstacle
+  function resolveObstacleCollisions() {
+    const r = ball.radius;
+    for (const obs of obstacleRects) {
+      // Closest point on the AABB to the ball center
+      const cx = Math.max(obs.x, Math.min(ball.x, obs.x + obs.w));
+      const cy = Math.max(obs.y, Math.min(ball.y, obs.y + obs.h));
+      const dx = ball.x - cx;
+      const dy = ball.y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < r && dist > 0) {
+        // Penetration depth and collision normal
+        const pen = r - dist;
+        const nx  = dx / dist;
+        const ny  = dy / dist;
+
+        // Push ball out of obstacle
+        ball.x += nx * pen;
+        ball.y += ny * pen;
+
+        // Reflect velocity along collision normal (impulse-based)
+        const dot = ball.vx * nx + ball.vy * ny;
+        if (dot < 0) {
+          ball.vx -= (1 + RESTITUTION) * dot * nx;
+          ball.vy -= (1 + RESTITUTION) * dot * ny;
+          ball.vx *= FRICTION;
+          ball.vy *= FRICTION;
+        }
+      }
+    }
+  }
+
+  function updatePhysics(dt) {
+    // Cap dt to avoid the "spiral of death" when the tab was hidden/paused
+    const safeDt = Math.min(dt, 32);
+
+    // Semi-implicit (symplectic) Euler: update velocity first, then position.
+    // More energy-stable than explicit Euler for spring/gravity systems.
+    ball.vx += gravity.x * safeDt;
+    ball.vy += gravity.y * safeDt;
+
+    // Air resistance — tiny per-frame decay keeps energy bounded
+    ball.vx *= DAMPING;
+    ball.vy *= DAMPING;
+
+    ball.x += ball.vx * safeDt;
+    ball.y += ball.vy * safeDt;
+
+    resolveWallCollision();
+    resolveObstacleCollisions();
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  RENDERING
+  // ═══════════════════════════════════════════════════════════════════════════
+  function render() {
+    ctx.clearRect(0, 0, canvasW, canvasH);
+
+    // Drop shadow via canvas shadow API
+    ctx.save();
+    ctx.shadowColor    = 'rgba(0,0,0,0.35)';
+    ctx.shadowBlur     = 12;
+    ctx.shadowOffsetX  = 2;
+    ctx.shadowOffsetY  = 4;
+
+    // Radial gradient gives the ball a shiny sphere appearance
+    const grad = ctx.createRadialGradient(
+      ball.x - ball.radius * 0.3, ball.y - ball.radius * 0.3, ball.radius * 0.1,
+      ball.x, ball.y, ball.radius
+    );
+    grad.addColorStop(0, '#a0cfff');
+    grad.addColorStop(0.5, '#4f8ef7');
+    grad.addColorStop(1, '#1a3a7a');
+
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+
+    // Obstacle debug outlines — helpful during development, remove in production
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth   = 1;
+    for (const obs of obstacleRects) {
+      ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+    }
+    ctx.restore();
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MAIN LOOP
+  // ═══════════════════════════════════════════════════════════════════════════
+  let lastTime   = null;
+  let frameCount = 0;
+
+  function loop(timestamp) {
+    if (!lastTime) lastTime = timestamp;
+    const dt   = timestamp - lastTime;
+    lastTime   = timestamp;
+
+    // Desktop fallback: simulate gravity from window movement every frame
+    if (!usingGyro) updateGravityFromWindow();
+
+    // Refresh obstacle positions every 10 frames — cheap enough, handles
+    // layout shifts from resize or scroll without running every single frame
+    if (frameCount % 10 === 0) refreshObstacles();
+    frameCount++;
+
+    updatePhysics(dt);
+    render();
+
+    requestAnimationFrame(loop);
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  INIT
+  // ═══════════════════════════════════════════════════════════════════════════
+  function init() {
+    resizeCanvas();
+    ball.x  = canvasW / 2;
+    ball.y  = canvasH / 4;
+    ball.vx = 1.5;
+    ball.vy = 0;
+    requestAnimationFrame(loop);
+  }
+
+  // Small delay so ResizeObserver fires at least once before we read dimensions
+  setTimeout(init, 50);
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PUBLIC API
+  //  Exposed on window.physicsApp for external scripts to interact with.
+  // ═══════════════════════════════════════════════════════════════════════════
+  window.physicsApp = {
+    // Register a CSS selector whose matching DOM elements become physics obstacles.
+    // Example: physicsApp.addObstacle('#my-shelf')
+    addObstacle,
+
+    // Read current ball state (copy, not reference)
+    getBall: () => ({ ...ball }),
+  };
+
+})();
+</script>
+</body>
+</html>
