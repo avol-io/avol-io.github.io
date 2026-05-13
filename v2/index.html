@@ -247,7 +247,7 @@
       `gravity.x: ${gravity.x.toFixed(5)}<br>` +
       `gravity.y: ${gravity.y.toFixed(5)}<br>` +
       `ball vx: ${ball.vx.toFixed(2)} vy: ${ball.vy.toFixed(2)}<br>` +
-      `source: ${usingGyro ? '● gyro' : '○ window'}`;
+      `source: ${usingGyro ? '● gyro' : '○ window'}`+`<br> versione 3` ;
   }
 
 
@@ -321,17 +321,30 @@
   //  SNAP LOGIC
   // ═══════════════════════════════════════════════════════════════════════════
   function computeSnapAngle(rawAngle, currentSnap) {
-    const norm        = ((rawAngle    % 360) + 360) % 360;
-    const normCurrent = ((currentSnap % 360) + 360) % 360;
+  const norm        = ((rawAngle    % 360) + 360) % 360;
+  const normCurrent = ((currentSnap % 360) + 360) % 360;
 
-    for (const snap of [0, 90, 180, 270]) {
-      const dist = Math.abs(((norm - snap + 540) % 360) - 180);
-      if (snap !== normCurrent && dist < SNAP_ENTER_DEG - SNAP_HYSTERESIS) {
-        return snap;
-      }
-    }
+  // Distance from current snap — must exceed EXIT threshold before
+  // we even consider switching to another snap target
+  const distFromCurrent = Math.abs(((norm - normCurrent + 540) % 360) - 180);
+  if (distFromCurrent < SNAP_ENTER_DEG) {
+    // Still well within the current snap zone — don't change
     return currentSnap;
   }
+
+  // We've left the current snap zone — find the nearest new target
+  let bestSnap = currentSnap;
+  let bestDist = Infinity;
+  for (const snap of [0, 90, 180, 270]) {
+    if (snap === normCurrent) continue;
+    const dist = Math.abs(((norm - snap + 540) % 360) - 180);
+    if (dist < SNAP_ENTER_DEG - SNAP_HYSTERESIS && dist < bestDist) {
+      bestDist = dist;
+      bestSnap = snap;
+    }
+  }
+  return bestSnap;
+}
 
   function applySnapAngle(newSnap) {
     if (newSnap === snapAngle) return;
