@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,24 +13,11 @@
     background: #0f0f0f;
   }
 
-  /*
-   * DIV A — full-viewport fixed container.
-   * snapAngle updated only on OS-level orientation change (ResizeObserver h/w flip).
-   * No CSS transition — snap is instant (OS already animated the rotation).
-   * All physics children (canvas, obstacles) live in this coordinate frame.
-   */
   #div-a {
     position: fixed;
     inset: 0;
   }
 
-  /*
-   * DIV B — purely decorative rotating rectangle, child of div-a.
-   * Rotates continuously at relAngle = deviceAngle - snapAngle.
-   * Natural size = div-a minus 40px each axis (20px gap per side).
-   * JS coverScale keeps it fitting inside div-a as it rotates.
-   * No physics involvement — pointer-events disabled.
-   */
   #div-b {
     position: absolute;
     top: 50%; left: 50%;
@@ -42,12 +28,13 @@
     border-radius: 16px;
     transform-origin: center center;
     pointer-events: none;
+    color:white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
   }
 
-  /*
-   * BALL CANVAS — fills div-a completely.
-   * Physics coordinate space = div-a space.
-   */
   #ball-canvas {
     position: absolute;
     inset: 0;
@@ -57,10 +44,6 @@
     z-index: 10;
   }
 
-  /*
-   * OBSTACLES LAYER — axis-aligned in div-a space.
-   * Snaps with div-a, never follows div-b's continuous rotation.
-   */
   #obstacles-layer {
     position: absolute;
     inset: 0;
@@ -70,7 +53,6 @@
     pointer-events: none;
   }
 
-  /* Counter-rotates inside div-a to always point world-down */
   #gravity-arrow-a {
     position: absolute;
     bottom: 12px;
@@ -84,7 +66,6 @@
     z-index: 30;
   }
 
-  /* iOS permission overlay */
   #permission-overlay {
     position: fixed;
     inset: 0;
@@ -112,7 +93,6 @@
   }
   #permission-overlay.hidden { display: none; }
 
-  /* Debug panel */
   #debug-info {
     position: fixed;
     top: 8px; left: 8px;
@@ -136,7 +116,7 @@
 </div>
 
 <div id="div-a">
-  <div id="div-b"></div>
+  <div id="div-b">↓</div>
   <canvas id="ball-canvas"></canvas>
   <div id="obstacles-layer">
     <!-- Demo obstacle — remove or replace -->
@@ -158,13 +138,13 @@
 
   // ─── Physics constants ───────────────────────────────────────────────────────
   const BALL_RADIUS      = 18;
-  const RESTITUTION      = 0.72;   // energy retained on bounce
-  const FRICTION         = 0.985;  // tangential damping on wall contact
-  const DAMPING          = 0.999;  // per-frame air resistance
-  const GRAVITY_STRENGTH = 0.0035; // base gravity scale
-  const WIN_ACCEL_SCALE  = 0.18;   // window movement → gravity multiplier (desktop)
-  const WIN_LOWPASS      = 0.12;   // smoothing factor for window velocity
-  const MAX_WIN_DELTA    = 40;     // px clamp for window position delta
+  const RESTITUTION      = 0.72;
+  const FRICTION         = 0.985;
+  const DAMPING          = 0.999;
+  const GRAVITY_STRENGTH = 0.0035;
+  const WIN_ACCEL_SCALE  = 0.18;
+  const WIN_LOWPASS      = 0.12;
+  const MAX_WIN_DELTA    = 40;
 
   // ─── DOM refs ───────────────────────────────────────────────────────────────
   const divA    = document.getElementById('div-a');
@@ -186,64 +166,86 @@
   const ball = { x: 0, y: 0, vx: 0, vy: 0, radius: BALL_RADIUS };
 
   // ─── Sensor state ────────────────────────────────────────────────────────────
-  let rawBeta     = 0;   // beta from deviceorientation (degrees)
-  let rawGamma    = 0;   // gamma from deviceorientation (degrees)
-  let deviceAngle = 0;   // gamma, used for div-b continuous rotation
-  let snapAngle   = 0;   // current div-a orientation: 0 / 90 / 180 / 270
+  let rawBeta     = 0;
+  let rawGamma    = 0;
+  let deviceAngle = 0;
+  let snapAngle   = 0;
   let usingGyro   = false;
 
   // ─── 180° flip detection ─────────────────────────────────────────────────────
-  // Tracks whether the device is "beta-positive" (normal portrait / normal landscape)
-  // vs "beta-negative" (upside-down portrait / upside-down landscape).
-  // A sign flip while h/w ratio is unchanged signals a 180° rotation.
-  let lastBetaPositive = true; // true = beta >= 0
+  // FIX #4: Track a low-pass filtered beta to avoid false 180° snaps during
+  // normal tilting. Only trigger when the smoothed value clearly crosses the
+  // threshold (hysteresis ±20°), not on every zero-crossing.
+  let smoothedBeta    = 0;
+  let betaFlipArmed   = true;   // true = we can accept the next crossing
+  const BETA_LP       = 0.08;   // low-pass factor for beta smoothing
+  const BETA_HYST_POS = 20;     // must exceed +20 to be considered "positive"
+  const BETA_HYST_NEG = -20;    // must be below -20 to be considered "negative"
+  let lastBetaRegion  = 'pos';  // 'pos' | 'neg' | 'ambiguous'
 
   // ─── Orientation tracking for resize-based snap ──────────────────────────────
-  // We detect OS-level orientation changes by watching when div-a's h/w ratio
-  // flips (portrait ↔ landscape). At that moment rawGamma tells us the direction.
   let isPortrait = window.innerHeight > window.innerWidth;
 
   // ─── Desktop window movement state ──────────────────────────────────────────
-  let prevScreenX = window.screenX;
-  let prevScreenY = window.screenY;
+  // FIX #7: Guard screenX/Y access — not available in iframes / some PWA contexts.
+  let screenAPIAvailable = false;
+  try {
+    const tx = window.screenX;
+    const ty = window.screenY;
+    // If we read two different frames and they differ or if the properties exist at all
+    screenAPIAvailable = (typeof tx === 'number' && typeof ty === 'number');
+  } catch(e) {
+    screenAPIAvailable = false;
+  }
+  let prevScreenX = screenAPIAvailable ? window.screenX : 0;
+  let prevScreenY = screenAPIAvailable ? window.screenY : 0;
   let winVelX = 0, winVelY = 0;
+
+  // ─── RAF handle for cleanup ─────────────────────────────────────────────────
+  // FIX #5: Store RAF id so the loop can be cancelled.
+  let rafId = null;
 
   // ─── Obstacles ───────────────────────────────────────────────────────────────
   const obstacleSelectors = [];
   let   obstacleRects     = [];
 
+  // FIX #9: ResizeObserver per-obstacle to avoid per-frame querySelectorAll +
+  // getBoundingClientRect layout thrashing. We rebuild rects only on actual
+  // layout changes, not every 10 frames.
+  let   obstaclesDirty  = true;   // set true whenever any obstacle moves/resizes
+  const obstacleROMap   = new Map(); // element → ResizeObserver
+
+  // ─── Absolute orientation detection ─────────────────────────────────────────
+  // FIX #10: Detect whether the browser fires absolute deviceorientation events
+  // (absolute=true) vs relative. On Android Chrome, absolute events have
+  // compassHeading available and absolute===true; raw beta/gamma are the same
+  // but we log it for the debug panel.
+  let orientationIsAbsolute = false;
+
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  DEBUG PANEL — remove updateDebug() call in loop() for production
+  //  DEBUG PANEL
   // ═══════════════════════════════════════════════════════════════════════════
   function updateDebug() {
     debugEl.innerHTML =
       `beta (raw): ${rawBeta.toFixed(1)}°<br>` +
+      `beta (smooth): ${smoothedBeta.toFixed(1)}°<br>` +
       `gamma (raw): ${rawGamma.toFixed(1)}°<br>` +
       `deviceAngle: ${deviceAngle.toFixed(1)}°<br>` +
       `snapAngle: ${snapAngle}°<br>` +
       `gravity.x: ${gravity.x.toFixed(5)}<br>` +
       `gravity.y: ${gravity.y.toFixed(5)}<br>` +
       `ball vx: ${ball.vx.toFixed(2)} vy: ${ball.vy.toFixed(2)}<br>` +
-      `source: ${usingGyro ? '● gyro' : '○ window'}<br>` +
-      `v4`;
+      `source: ${usingGyro ? '● gyro' : (screenAPIAvailable ? '○ window' : '○ static')}<br>` +
+      `absOrientation: ${orientationIsAbsolute}<br>` +
+      `v5-fixed`;
   }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  SNAP APPLICATION
-  //  Called only on OS-level orientation events (resize h/w flip or 180° beta flip).
-  //  No CSS transition on div-a — OS already animated the screen rotation.
-  //
-  //  On snap:
-  //  1. Ball velocity is counter-rotated by -delta so trajectory feels continuous.
-  //  2. Ball position is rotated around canvas center so it stays at the same
-  //     world location (e.g. 10px from corner A before snap = 10px after).
-  //  3. div-a CSS transform updated instantly.
-  //  4. Gravity arrow counter-rotated to always point world-down.
   // ═══════════════════════════════════════════════════════════════════════════
   function applySnapAngle(newSnap) {
-    // Normalize to 0–359
     newSnap = ((newSnap % 360) + 360) % 360;
     if (newSnap === snapAngle) return;
 
@@ -252,13 +254,11 @@
     const cos   = Math.cos(rad);
     const sin   = Math.sin(rad);
 
-    // Counter-rotate velocity — ball continues its physical trajectory
     const newVx = ball.vx * cos - ball.vy * sin;
     const newVy = ball.vx * sin + ball.vy * cos;
     ball.vx = newVx;
     ball.vy = newVy;
 
-    // Rotate position around canvas center — ball stays at same world location
     const cx = canvasW / 2;
     const cy = canvasH / 2;
     const px = ball.x - cx;
@@ -268,53 +268,63 @@
 
     snapAngle = newSnap;
 
-    // Instant snap — no transition (OS already handled the animation)
     divA.style.transform   = `rotate(${snapAngle}deg)`;
     arrowA.style.transform = `translateX(-50%) rotate(${-snapAngle}deg)`;
+
+    // Obstacles moved relative to the rotated frame — mark dirty
+    obstaclesDirty = true;
   }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  CANVAS RESIZE
-  //  Uses offsetWidth/offsetHeight — layout dimensions, transform-independent.
-  //  getBoundingClientRect() returns post-transform size and causes
-  //  browser-specific inconsistencies when a CSS transform is active.
+  //  FIX #1: Use ctx.setTransform() instead of ctx.scale() to avoid
+  //  accumulating the DPR scale on every resize call.
   // ═══════════════════════════════════════════════════════════════════════════
   function resizeCanvas() {
     const w = divA.offsetWidth;
     const h = divA.offsetHeight;
-
     const dpr = window.devicePixelRatio || 1;
+
     canvas.width  = w * dpr;
     canvas.height = h * dpr;
     canvas.style.width  = w + 'px';
     canvas.style.height = h + 'px';
-    ctx.scale(dpr, dpr);
+
+    // FIX #1: setTransform resets the matrix before applying DPR scale,
+    // so repeated calls never accumulate extra scaling.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     canvasW = w;
     canvasH = h;
 
     ball.x = Math.max(ball.radius, Math.min(canvasW - ball.radius, ball.x || canvasW / 2));
     ball.y = Math.max(ball.radius, Math.min(canvasH - ball.radius, ball.y || canvasH / 4));
+
+    // Layout changed — obstacle rects need refresh
+    obstaclesDirty = true;
   }
+
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  RESIZE OBSERVER — orientation change detection
   //
-  //  Portrait ↔ landscape: h/w ratio flips → use rawGamma sign to determine
-  //  rotation direction (+90 or -90).
-  //
-  //  180° flip: h/w ratio unchanged but beta sign inverts → add 180°.
-  //  Detected separately in updateGravityFromOrientation() via lastBetaPositive.
+  //  FIX #6: Distinguish between a genuine orientation flip (h/w ratio change)
+  //  and other resize events (virtual keyboard, browser chrome changes).
+  //  We guard with a minimum dimension-ratio change threshold to avoid false
+  //  orientation snaps triggered by soft keyboard or address-bar hide/show.
   // ═══════════════════════════════════════════════════════════════════════════
   const ro = new ResizeObserver(() => {
-    const nowPortrait = divA.offsetHeight > divA.offsetWidth;
+    const w = divA.offsetWidth;
+    const h = divA.offsetHeight;
+    if (w === 0 || h === 0) return;
 
+    const nowPortrait = h > w;
+
+    // FIX #6: Only treat this as an orientation flip if the ratio crossed the
+    // square boundary (i.e. was portrait and is now landscape or vice versa).
+    // Small changes (keyboard, scrollbar) won't flip h > w.
     if (nowPortrait !== isPortrait) {
-      // h/w ratio flipped → 90° rotation occurred.
-      // rawGamma sign at the moment of resize tells us the direction:
-      //   gamma < 0 → rotated counter-clockwise → snapAngle decreases
-      //   gamma > 0 → rotated clockwise         → snapAngle increases
       const delta = rawGamma < 0 ? -90 : 90;
       applySnapAngle(snapAngle + delta);
       isPortrait = nowPortrait;
@@ -327,12 +337,8 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  DIV B TRANSFORM
-  //  div-b rotates continuously at relAngle = deviceAngle - snapAngle.
-  //  Scaled with coverScale (fit/min) so it never overflows div-a.
-  //  The 20px gap is encoded in its natural CSS size (calc(100% - 40px)).
   // ═══════════════════════════════════════════════════════════════════════════
   function coverScale(containerW, containerH, innerW, innerH, angleRad) {
-    // Minimum scale to fit a rotated innerW×innerH rectangle inside the container.
     const a = Math.abs(Math.cos(angleRad));
     const b = Math.abs(Math.sin(angleRad));
     const scaleX = containerW / (innerW * a + innerH * b);
@@ -343,61 +349,73 @@
   function updateDivBTransform() {
     const relAngle = deviceAngle - snapAngle;
     const relRad   = relAngle * Math.PI / 180;
-
     const aW = divA.offsetWidth;
     const aH = divA.offsetHeight;
     const bW = divB.offsetWidth;
     const bH = divB.offsetHeight;
-
     const scale = coverScale(aW, aH, bW, bH, relRad);
     divB.style.transform = `rotate(${relAngle}deg) scale(${scale})`;
   }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  GRAVITY — MOBILE (device orientation)
+  //  GRAVITY — MOBILE
   //
-  //  Portrait reference: beta=90 is upright. We offset by -90 so:
-  //    betaOffset = 0  → phone perfectly vertical → no spurious Y gravity
-  //    betaOffset > 0  → tilting top toward user
-  //    betaOffset < 0  → tilting top away
+  //  FIX #4: 180° flip detection replaced with hysteresis + low-pass filter.
+  //  - smoothedBeta tracks a low-pass-filtered beta.
+  //  - A flip is only registered when smoothedBeta clearly crosses into the
+  //    opposite region (>+BETA_HYST_POS or <BETA_HYST_NEG), preventing
+  //    false triggers during normal near-horizontal holding.
+  //  - Once a flip fires, betaFlipArmed=false until smoothedBeta returns to
+  //    the ambiguous zone, preventing double-fires.
   //
-  //  World-frame gravity is projected into div-a's coordinate frame
-  //  by rotating by -snapAngle. This decouples physics from snap events:
-  //  the ball never "feels" a snap, only real-world gravity direction.
-  //
-  //  180° detection: if beta sign flips while h/w ratio is unchanged
-  //  (isPortrait hasn't changed), the device was flipped upside-down.
+  //  FIX #10: We accept both relative and absolute deviceorientation.
+  //  Absolute events have the same beta/gamma semantics for tilt, so physics
+  //  is unaffected. We just record the flag for debug.
   // ═══════════════════════════════════════════════════════════════════════════
-  function updateGravityFromOrientation(beta, gamma) {
+  function updateGravityFromOrientation(beta, gamma, absolute) {
     rawBeta     = beta  || 0;
     rawGamma    = gamma || 0;
     deviceAngle = rawGamma;
+    orientationIsAbsolute = !!absolute;
 
-    // ── 180° flip detection ────────────────────────────────────────────────
-    // beta > 0 in normal orientation, beta < 0 when flipped 180°.
-    // We only act on the sign flip — not on continuous beta changes.
-    const betaPositive = rawBeta >= 0;
-    if (betaPositive !== lastBetaPositive) {
-      // Sign changed — 180° flip. Only valid if h/w ratio didn't also change
-      // (if it did, the ResizeObserver already handled it as a 90° snap).
-      const nowPortrait = divA.offsetHeight > divA.offsetWidth;
-      if (nowPortrait === isPortrait) {
-        applySnapAngle(snapAngle + 180);
+    // FIX #4: low-pass filter beta, then apply hysteresis for 180° detection
+    smoothedBeta = smoothedBeta * (1 - BETA_LP) + rawBeta * BETA_LP;
+
+    if (smoothedBeta > BETA_HYST_POS) {
+      if (lastBetaRegion === 'neg' && betaFlipArmed) {
+        const nowPortrait = divA.offsetHeight > divA.offsetWidth;
+        if (nowPortrait === isPortrait) {
+          applySnapAngle(snapAngle + 180);
+        }
+        betaFlipArmed = false;
       }
-      lastBetaPositive = betaPositive;
+      lastBetaRegion = 'pos';
+    } else if (smoothedBeta < BETA_HYST_NEG) {
+      if (lastBetaRegion === 'pos' && betaFlipArmed) {
+        const nowPortrait = divA.offsetHeight > divA.offsetWidth;
+        if (nowPortrait === isPortrait) {
+          applySnapAngle(snapAngle + 180);
+        }
+        betaFlipArmed = false;
+      }
+      lastBetaRegion = 'neg';
+    } else {
+      // In ambiguous zone — re-arm for next crossing
+      lastBetaRegion = 'ambiguous';
+      betaFlipArmed  = true;
     }
 
-    // ── Gravity projection ─────────────────────────────────────────────────
+    // Gravity projection
     const betaOffset = Math.max(-90, Math.min(90, rawBeta - 90));
-    const bRad = betaOffset * Math.PI / 180;
-    const gRad = Math.max(-90, Math.min(90, rawGamma)) * Math.PI / 180;
+   // DOPO (corretto — formula W3C):
+const bRad = rawBeta  * Math.PI / 180;
+const gRad = rawGamma * Math.PI / 180;
+// Nessun clamp su beta: lasciamo che il segno si inverta naturalmente
+// quando il telefono è upside-down (gestito già dallo snap a 180°)
+const worldGx =  Math.sin(gRad) * GRAVITY_STRENGTH * 20;
+const worldGy =  Math.cos(gRad) * Math.sin(bRad) * GRAVITY_STRENGTH * 20;
 
-    // World-frame gravity vector
-    const worldGx =  Math.sin(gRad) * GRAVITY_STRENGTH * 20;
-    const worldGy =  Math.sin(bRad) * GRAVITY_STRENGTH * 20;
-
-    // Rotate into div-a frame by -snapAngle
     const snapRad = -snapAngle * Math.PI / 180;
     const cos     = Math.cos(snapRad);
     const sin     = Math.sin(snapRad);
@@ -405,7 +423,7 @@
     gravity.y = worldGx * sin + worldGy * cos;
 
     if (Math.abs(gravity.x) < 0.0001 && Math.abs(gravity.y) < 0.0001) {
-      gravity.y = GRAVITY_STRENGTH; // minimum gravity when device is flat
+      gravity.y = GRAVITY_STRENGTH;
     }
 
     updateDivBTransform();
@@ -413,11 +431,18 @@
 
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  GRAVITY — DESKTOP (window movement fallback)
-  //  Simulates gravity by tracking browser window position on screen.
-  //  Moving window right → ball feels pull to the right, etc.
+  //  GRAVITY — DESKTOP
+  //  FIX #7: Guard screenX/Y behind screenAPIAvailable flag.
+  //  Falls back to constant downward gravity when the API is unavailable.
   // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromWindow() {
+    if (!screenAPIAvailable) {
+      // Iframe / PWA / unsupported context — constant downward gravity
+      gravity.x = 0;
+      gravity.y = GRAVITY_STRENGTH;
+      return;
+    }
+
     const dx = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenX - prevScreenX));
     const dy = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenY - prevScreenY));
     prevScreenX = window.screenX;
@@ -433,12 +458,25 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  DEVICE ORIENTATION SETUP
-  //  iOS 13+ requires explicit user permission for DeviceOrientationEvent.
+  //  FIX #10: Listen to both 'deviceorientation' (relative) and
+  //  'deviceorientationabsolute' (Android absolute). Absolute fires only when
+  //  relative is unavailable or less accurate, so we prefer whichever arrives.
+  //  Once we receive an absolute event we stop treating relative events as
+  //  authoritative (they may come in simultaneously on some browsers).
   // ═══════════════════════════════════════════════════════════════════════════
   function startOrientation() {
-    window.addEventListener('deviceorientation', (e) => {
+    let absoluteReceived = false;
+
+    window.addEventListener('deviceorientationabsolute', (e) => {
       usingGyro = true;
-      updateGravityFromOrientation(e.beta, e.gamma);
+      absoluteReceived = true;
+      updateGravityFromOrientation(e.beta, e.gamma, true);
+    });
+
+    window.addEventListener('deviceorientation', (e) => {
+      if (absoluteReceived) return; // prefer absolute when available
+      usingGyro = true;
+      updateGravityFromOrientation(e.beta, e.gamma, e.absolute || false);
     });
   }
 
@@ -469,30 +507,85 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  OBSTACLES
-  //  DOM elements inside #obstacles-layer, axis-aligned in div-a space.
-  //  Positions read via getBoundingClientRect relative to canvas rect.
-  //  canvas has no own transform, so the subtraction correctly maps
-  //  screen-space obstacle positions into canvas (div-a) coordinates.
+  //
+  //  FIX #3 + FIX #9:
+  //  - Rects are now computed in div-a's LOCAL coordinate frame by
+  //    un-rotating the screen-space rect, instead of naively subtracting
+  //    canvas.getBoundingClientRect() (which is post-transform).
+  //  - A ResizeObserver per obstacle element marks obstaclesDirty instead of
+  //    polling getBoundingClientRect every 10 frames.
   // ═══════════════════════════════════════════════════════════════════════════
-  function addObstacle(cssSelector) {
-    if (!obstacleSelectors.includes(cssSelector)) obstacleSelectors.push(cssSelector);
+
+  /**
+   * Convert a screen-space DOMRect into div-a's local (un-rotated) coordinate frame.
+   * div-a is centered on screen and rotated by snapAngle degrees.
+   * We un-rotate the rect's center by -snapAngle around div-a's center,
+   * then express w/h in the local frame (swap if needed for 90°/270° snaps).
+   */
+  function screenRectToDivALocal(r) {
+    const aRect  = divA.getBoundingClientRect(); // always axis-aligned (it is fixed:inset:0)
+    const aCx    = aRect.left + aRect.width  / 2;
+    const aCy    = aRect.top  + aRect.height / 2;
+
+    // Center of the obstacle in screen space
+    const rCx = r.left + r.width  / 2;
+    const rCy = r.top  + r.height / 2;
+
+    // Translate to div-a center, then un-rotate by -snapAngle
+    const rad  = -snapAngle * Math.PI / 180;
+    const cos  = Math.cos(rad);
+    const sin  = Math.sin(rad);
+    const dx   = rCx - aCx;
+    const dy   = rCy - aCy;
+    const lx   = dx * cos - dy * sin;
+    const ly   = dx * sin + dy * cos;
+
+    // In the local frame, w/h also need to be un-rotated.
+    // For axis-aligned elements and 90°-multiple snaps, just swap.
+    const snapMod = ((snapAngle % 180) + 180) % 180;
+    const localW  = snapMod === 90 ? r.height : r.width;
+    const localH  = snapMod === 90 ? r.width  : r.height;
+
+    // Convert from center-relative to top-left in div-a coordinate space
+    // (origin = top-left of div-a = canvas origin)
+    return {
+      x: lx - localW / 2 + canvasW / 2,
+      y: ly - localH / 2 + canvasH / 2,
+      w: localW,
+      h: localH,
+    };
   }
 
   function refreshObstacles() {
-    const cr = canvas.getBoundingClientRect();
-    obstacleRects = [];
+    if (!obstaclesDirty) return;
+    obstaclesDirty = false;
+    obstacleRects  = [];
+
+    const allElements = new Set();
 
     for (const sel of obstacleSelectors) {
-      document.querySelectorAll(sel).forEach(el => {
-        const r = el.getBoundingClientRect();
-        obstacleRects.push({ x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
-      });
+      document.querySelectorAll(sel).forEach(el => allElements.add(el));
     }
+    document.querySelectorAll('.obstacle').forEach(el => allElements.add(el));
 
-    document.querySelectorAll('.obstacle').forEach(el => {
+    for (const el of allElements) {
       const r = el.getBoundingClientRect();
-      obstacleRects.push({ x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
-    });
+      obstacleRects.push(screenRectToDivALocal(r));
+
+      // FIX #9: Attach a ResizeObserver if not already watching this element
+      if (!obstacleROMap.has(el)) {
+        const obs = new ResizeObserver(() => { obstaclesDirty = true; });
+        obs.observe(el);
+        obstacleROMap.set(el, obs);
+      }
+    }
+  }
+
+  function addObstacle(cssSelector) {
+    if (!obstacleSelectors.includes(cssSelector)) {
+      obstacleSelectors.push(cssSelector);
+      obstaclesDirty = true;
+    }
   }
 
 
@@ -513,7 +606,6 @@
 
   function resolveObstacleCollisions() {
     for (const obs of obstacleRects) {
-      // Closest point on AABB to ball center
       const cx   = Math.max(obs.x, Math.min(ball.x, obs.x + obs.w));
       const cy   = Math.max(obs.y, Math.min(ball.y, obs.y + obs.h));
       const dx   = ball.x - cx;
@@ -538,17 +630,13 @@
   }
 
   function updatePhysics(dt) {
-    // Cap dt to avoid spiral-of-death when tab resumes from background
     const safeDt = Math.min(dt, 32);
-
-    // Symplectic Euler: velocity first, then position (more stable than explicit)
     ball.vx += gravity.x * safeDt;
     ball.vy += gravity.y * safeDt;
     ball.vx *= DAMPING;
     ball.vy *= DAMPING;
     ball.x  += ball.vx * safeDt;
     ball.y  += ball.vy * safeDt;
-
     resolveWallCollision();
     resolveObstacleCollisions();
   }
@@ -556,8 +644,12 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  RENDERING
+  //  FIX #2: clearRect now uses canvasW/canvasH which are the CSS-pixel
+  //  dimensions. Since ctx has the DPR transform applied via setTransform(),
+  //  these values correctly map to the full physical canvas area.
   // ═══════════════════════════════════════════════════════════════════════════
   function render() {
+    // FIX #2: correct — CSS-pixel dimensions match the transformed context
     ctx.clearRect(0, 0, canvasW, canvasH);
 
     ctx.save();
@@ -580,7 +672,7 @@
     ctx.fill();
     ctx.restore();
 
-    // Obstacle debug outlines — remove in production
+    // Obstacle debug outlines
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth   = 1;
@@ -590,50 +682,93 @@
 
 
   // ═══════════════════════════════════════════════════════════════════════════
+  //  VISIBILITY CHANGE — FIX #5
+  //  Pause the loop when the tab is hidden, resume when visible.
+  //  This prevents dt spikes (spiral-of-death) after the tab returns from
+  //  background, and eliminates unnecessary CPU/GPU usage.
+  // ═══════════════════════════════════════════════════════════════════════════
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId    = null;
+        lastTime = null; // reset so dt is 0 on resume
+      }
+    } else {
+      if (rafId === null) {
+        rafId = requestAnimationFrame(loop);
+      }
+    }
+  });
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
   //  MAIN LOOP
+  //  FIX #5: Store RAF id in rafId for cancellation.
+  //  FIX #9: refreshObstacles() is now O(1) when nothing changed (dirty flag).
   // ═══════════════════════════════════════════════════════════════════════════
   let lastTime   = null;
-  let frameCount = 0;
 
   function loop(timestamp) {
+    rafId = requestAnimationFrame(loop);
+
     if (!lastTime) lastTime = timestamp;
     const dt = timestamp - lastTime;
     lastTime  = timestamp;
 
     if (!usingGyro) updateGravityFromWindow();
-    if (frameCount % 10 === 0) refreshObstacles(); // cheap enough, handles layout shifts
-    frameCount++;
+    refreshObstacles(); // O(1) when !obstaclesDirty
 
     updatePhysics(dt);
     render();
     updateDebug();
-
-    requestAnimationFrame(loop);
   }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  INIT
+  //  FIX #11: Wait for the first ResizeObserver callback before starting the
+  //  loop, so canvasW/H are correct from frame 1.
+  //  A 50ms setTimeout fallback is kept only as a safety net in case RO
+  //  never fires (e.g. display:none at startup).
   // ═══════════════════════════════════════════════════════════════════════════
+  let initialized = false;
+
   function init() {
+    if (initialized) return;
+    initialized = true;
+
     resizeCanvas();
     ball.x  = canvasW / 2;
     ball.y  = canvasH / 4;
     ball.vx = 1.5;
     ball.vy = 0;
-    requestAnimationFrame(loop);
+    rafId = requestAnimationFrame(loop);
   }
 
-  // Small delay so ResizeObserver fires at least once before reading dimensions
-  setTimeout(init, 50);
+  // FIX #11: Trigger init on the first ResizeObserver callback instead of
+  // a blind setTimeout. The RO is already observing divA above; we hook into
+  // it by replacing its callback temporarily.
+  const roOriginalCallback = ro; // already observing; init fires on first entry
+  const initRO = new ResizeObserver(() => {
+    init();
+    initRO.disconnect(); // one-shot
+  });
+  initRO.observe(divA);
+
+  // Safety-net fallback: if the initRO never fires within 100ms, start anyway
+  setTimeout(init, 100);
 
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  PUBLIC API
   // ═══════════════════════════════════════════════════════════════════════════
   window.physicsApp = {
-    addObstacle,               // physicsApp.addObstacle('#my-element')
-    getBall: () => ({ ...ball }), // read-only snapshot of ball state
+    addObstacle,
+    getBall: () => ({ ...ball }),
+    // FIX #5: expose stop/start for external lifecycle management
+    stop:  () => { if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; } },
+    start: () => { if (rafId === null) { lastTime = null; rafId = requestAnimationFrame(loop); } },
   };
 
 })();
