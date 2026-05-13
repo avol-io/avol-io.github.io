@@ -13,18 +13,15 @@
     height: 100%;
     overflow: hidden;
     background: #0f0f0f;
-  }
-
-  body {
     font-family: system-ui, sans-serif;
   }
 
   #div-a {
     position: fixed;
     inset: 0;
-    transform-origin: center center;
   }
 
+  /* div-b ruota per stare allineato al mondo reale (counter-rotate rispetto al tilt) */
   #div-b {
     position: absolute;
     top: 50%;
@@ -150,24 +147,27 @@
 (function () {
   'use strict';
 
-  const BALL_RADIUS = 18;
-  const RESTITUTION = 0.72;
-  const FRICTION = 0.985;
-  const DAMPING = 0.999;
+  // ─── Costanti fisiche ────────────────────────────────────────────────────────
+  const BALL_RADIUS      = 18;
+  const RESTITUTION      = 0.72;
+  const FRICTION         = 0.985;
+  const DAMPING          = 0.999;
   const GRAVITY_STRENGTH = 0.0035;
-  const WIN_ACCEL_SCALE = 0.18;
-  const WIN_LOWPASS = 0.12;
-  const MAX_WIN_DELTA = 40;
+  const WIN_ACCEL_SCALE  = 0.18;
+  const WIN_LOWPASS      = 0.12;
+  const MAX_WIN_DELTA    = 40;
+  // Timeout oltre il quale si smette di preferire deviceorientationabsolute
   const ABS_EVENT_TIMEOUT_MS = 500;
 
-  const divA = document.getElementById('div-a');
-  const divB = document.getElementById('div-b');
-  const canvas = document.getElementById('ball-canvas');
-  const ctx = canvas.getContext('2d');
-  const overlay = document.getElementById('permission-overlay');
-  const permBtn = document.getElementById('permission-btn');
-  const debugEl = document.getElementById('debug-info');
-  const arrowA = document.getElementById('gravity-arrow-a');
+  // ─── DOM refs ────────────────────────────────────────────────────────────────
+  const divA          = document.getElementById('div-a');
+  const divB          = document.getElementById('div-b');
+  const canvas        = document.getElementById('ball-canvas');
+  const ctx           = canvas.getContext('2d');
+  const overlay       = document.getElementById('permission-overlay');
+  const permBtn       = document.getElementById('permission-btn');
+  const debugEl       = document.getElementById('debug-info');
+  const arrowA        = document.getElementById('gravity-arrow-a');
   const obstaclesLayer = document.getElementById('obstacles-layer');
 
   if (!ctx) {
@@ -176,104 +176,68 @@
     return;
   }
 
-  let canvasW = 0;
-  let canvasH = 0;
+  // ─── Stato mondo ─────────────────────────────────────────────────────────────
+  let canvasW = 0, canvasH = 0;
   let lastTime = null;
-  let rafId = null;
+  let rafId    = null;
   let initialized = false;
-  let destroyed = false;
+  let destroyed   = false;
 
+  // ─── Gravità (px/ms²) ────────────────────────────────────────────────────────
   const gravity = { x: 0, y: GRAVITY_STRENGTH };
+
+  // ─── Palla ───────────────────────────────────────────────────────────────────
   const ball = { x: 0, y: 0, vx: 0, vy: 0, radius: BALL_RADIUS };
 
-  let rawBeta = 0;
-  let rawGamma = 0;
-  let deviceAngle = 0;
-  let snapAngle = 0;
+  // ─── Sensori ─────────────────────────────────────────────────────────────────
+  let rawBeta   = 0;
+  let rawGamma  = 0;
   let usingGyro = false;
   let orientationIsAbsolute = false;
-  let lastAbsoluteEventTs = 0;
+  let lastAbsoluteEventTs   = 0;
 
-  let smoothedBeta = 0;
-  let betaFlipArmed = true;
-  const BETA_LP = 0.08;
-  const BETA_HYST_POS = 20;
-  const BETA_HYST_NEG = -20;
-  let lastBetaRegion = 'pos';
-
-  let isPortrait = window.innerHeight > window.innerWidth;
-
+  // ─── Desktop: movimento finestra ─────────────────────────────────────────────
   let screenAPIAvailable = false;
   try {
     screenAPIAvailable = Number.isFinite(window.screenX) && Number.isFinite(window.screenY);
-  } catch (error) {
-    screenAPIAvailable = false;
-  }
+  } catch (_) { screenAPIAvailable = false; }
 
   let prevScreenX = screenAPIAvailable ? window.screenX : 0;
   let prevScreenY = screenAPIAvailable ? window.screenY : 0;
-  let winVelX = 0;
-  let winVelY = 0;
+  let winVelX = 0, winVelY = 0;
 
+  // ─── Ostacoli ────────────────────────────────────────────────────────────────
   const obstacleSelectors = [];
-  let obstacleRects = [];
-  let obstaclesDirty = true;
-  const obstacleROMap = new Map();
+  let   obstacleRects     = [];
+  let   obstaclesDirty    = true;
+  const obstacleROMap     = new Map();
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DEBUG
+  // ═══════════════════════════════════════════════════════════════════════════
   function updateDebug() {
     debugEl.innerHTML =
       `beta (raw): ${rawBeta.toFixed(1)}°<br>` +
-      `beta (smooth): ${smoothedBeta.toFixed(1)}°<br>` +
       `gamma (raw): ${rawGamma.toFixed(1)}°<br>` +
-      `deviceAngle: ${deviceAngle.toFixed(1)}°<br>` +
-      `snapAngle: ${snapAngle}°<br>` +
       `gravity.x: ${gravity.x.toFixed(5)}<br>` +
       `gravity.y: ${gravity.y.toFixed(5)}<br>` +
       `ball vx: ${ball.vx.toFixed(2)} vy: ${ball.vy.toFixed(2)}<br>` +
       `source: ${usingGyro ? '● gyro' : (screenAPIAvailable ? '○ window' : '○ static')}<br>` +
       `absOrientation: ${orientationIsAbsolute}<br>` +
-      `v6-final`;
+      `v7`;
   }
 
-  function normalizeDeltaDegrees(delta) {
-    return ((delta + 180) % 360 + 360) % 360 - 180;
-  }
-
-  function applySnapAngle(newSnap) {
-    newSnap = ((newSnap % 360) + 360) % 360;
-    if (newSnap === snapAngle) return;
-
-    const delta = normalizeDeltaDegrees(newSnap - snapAngle);
-    const rad = -delta * Math.PI / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-
-    const newVx = ball.vx * cos - ball.vy * sin;
-    const newVy = ball.vx * sin + ball.vy * cos;
-    ball.vx = newVx;
-    ball.vy = newVy;
-
-    const cx = canvasW / 2;
-    const cy = canvasH / 2;
-    const px = ball.x - cx;
-    const py = ball.y - cy;
-    ball.x = px * cos - py * sin + cx;
-    ball.y = px * sin + py * cos + cy;
-
-    snapAngle = newSnap;
-    divA.style.transform = `rotate(${snapAngle}deg)`;
-    arrowA.style.transform = `translateX(-50%) rotate(${-snapAngle}deg)`;
-    obstaclesDirty = true;
-  }
-
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CANVAS RESIZE
+  // ═══════════════════════════════════════════════════════════════════════════
   function resizeCanvas() {
-    const w = divA.offsetWidth;
-    const h = divA.offsetHeight;
+    const w   = divA.offsetWidth;
+    const h   = divA.offsetHeight;
     const dpr = window.devicePixelRatio || 1;
 
-    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.width  = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
-    canvas.style.width = `${w}px`;
+    canvas.style.width  = `${w}px`;
     canvas.style.height = `${h}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
@@ -285,6 +249,16 @@
     obstaclesDirty = true;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DIV-B TRANSFORM
+  //
+  //  div-a è fisso e non ruota mai.
+  //  div-b ruota di -deviceAngle (= -rawGamma) per restare allineato
+  //  al mondo reale: quando il telefono si inclina a sinistra (gamma < 0),
+  //  il box ruota in senso orario sullo schermo, rimanendo "in bolla".
+  //  La freccia ↓ all'interno punta sempre verso il basso reale.
+  //  coverScale assicura che il box copra sempre div-a nonostante la rotazione.
+  // ═══════════════════════════════════════════════════════════════════════════
   function coverScale(containerW, containerH, innerW, innerH, angleRad) {
     const a = Math.abs(Math.cos(angleRad));
     const b = Math.abs(Math.sin(angleRad));
@@ -294,53 +268,36 @@
   }
 
   function updateDivBTransform() {
-    const relAngle = deviceAngle - snapAngle;
-    const relRad = relAngle * Math.PI / 180;
-    const aW = divA.offsetWidth;
-    const aH = divA.offsetHeight;
-    const bW = divB.offsetWidth;
-    const bH = divB.offsetHeight;
-    const scale = coverScale(aW, aH, bW, bH, relRad);
-    divB.style.transform = `translate(-50%, -50%) rotate(${relAngle}deg) scale(${scale})`;
+    // Rotazione opposta al tilt del device → box resta allineato al mondo
+    const worldAngle = -rawGamma;
+    const rad  = worldAngle * Math.PI / 180;
+    const aW   = divA.offsetWidth;
+    const aH   = divA.offsetHeight;
+    const bW   = divB.offsetWidth;
+    const bH   = divB.offsetHeight;
+    const scale = coverScale(aW, aH, bW, bH, rad);
+    divB.style.transform  = `translate(-50%, -50%) rotate(${worldAngle}deg) scale(${scale})`;
+    // L'indicatore freccia in basso resta ancorato allo schermo (invariante)
+    arrowA.style.transform = `translateX(-50%) rotate(${-worldAngle}deg)`;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  GRAVITÀ — MOBILE
+  //  Formula W3C per proiettare beta/gamma sul piano dello schermo.
+  //  Nessun snap: la gravità segue direttamente l'inclinazione del device.
+  // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromOrientation(beta, gamma, absolute) {
-    rawBeta = Number.isFinite(beta) ? beta : 0;
+    rawBeta  = Number.isFinite(beta)  ? beta  : 0;
     rawGamma = Number.isFinite(gamma) ? gamma : 0;
-    deviceAngle = rawGamma;
     orientationIsAbsolute = !!absolute;
 
-    smoothedBeta = smoothedBeta * (1 - BETA_LP) + rawBeta * BETA_LP;
-
-    if (smoothedBeta > BETA_HYST_POS) {
-      if (lastBetaRegion === 'neg' && betaFlipArmed) {
-        const nowPortrait = divA.offsetHeight > divA.offsetWidth;
-        if (nowPortrait === isPortrait) applySnapAngle(snapAngle + 180);
-        betaFlipArmed = false;
-      }
-      lastBetaRegion = 'pos';
-    } else if (smoothedBeta < BETA_HYST_NEG) {
-      if (lastBetaRegion === 'pos' && betaFlipArmed) {
-        const nowPortrait = divA.offsetHeight > divA.offsetWidth;
-        if (nowPortrait === isPortrait) applySnapAngle(snapAngle + 180);
-        betaFlipArmed = false;
-      }
-      lastBetaRegion = 'neg';
-    } else {
-      lastBetaRegion = 'ambiguous';
-      betaFlipArmed = true;
-    }
-
-    const bRad = rawBeta * Math.PI / 180;
+    const bRad = rawBeta  * Math.PI / 180;
     const gRad = rawGamma * Math.PI / 180;
-    const worldGx = Math.sin(gRad) * GRAVITY_STRENGTH * 20;
-    const worldGy = Math.cos(gRad) * Math.sin(bRad) * GRAVITY_STRENGTH * 20;
+    const gx = Math.sin(gRad) * GRAVITY_STRENGTH * 20;
+    const gy = Math.cos(gRad) * Math.sin(bRad) * GRAVITY_STRENGTH * 20;
 
-    const snapRad = -snapAngle * Math.PI / 180;
-    const cos = Math.cos(snapRad);
-    const sin = Math.sin(snapRad);
-    gravity.x = worldGx * cos - worldGy * sin;
-    gravity.y = worldGx * sin + worldGy * cos;
+    gravity.x = gx;
+    gravity.y = gy;
 
     if (Math.abs(gravity.x) < 0.0001 && Math.abs(gravity.y) < 0.0001) {
       gravity.x = 0;
@@ -350,13 +307,15 @@
     updateDivBTransform();
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  GRAVITÀ — DESKTOP (movimento finestra)
+  // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromWindow() {
     if (!screenAPIAvailable) {
       gravity.x = 0;
       gravity.y = GRAVITY_STRENGTH;
       return;
     }
-
     const dx = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenX - prevScreenX));
     const dy = Math.max(-MAX_WIN_DELTA, Math.min(MAX_WIN_DELTA, window.screenY - prevScreenY));
     prevScreenX = window.screenX;
@@ -369,17 +328,21 @@
     gravity.y = GRAVITY_STRENGTH + winVelY * WIN_ACCEL_SCALE * GRAVITY_STRENGTH * 20;
   }
 
-  function onDeviceOrientationAbsolute(event) {
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SENSOR SETUP
+  //  Preferisce deviceorientationabsolute; cade su deviceorientation
+  //  se non arriva nessun evento assoluto per ABS_EVENT_TIMEOUT_MS ms.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function onDeviceOrientationAbsolute(e) {
     usingGyro = true;
     lastAbsoluteEventTs = performance.now();
-    updateGravityFromOrientation(event.beta, event.gamma, true);
+    updateGravityFromOrientation(e.beta, e.gamma, true);
   }
 
-  function onDeviceOrientation(event) {
-    const now = performance.now();
-    if (now - lastAbsoluteEventTs <= ABS_EVENT_TIMEOUT_MS) return;
+  function onDeviceOrientation(e) {
+    if (performance.now() - lastAbsoluteEventTs <= ABS_EVENT_TIMEOUT_MS) return;
     usingGyro = true;
-    updateGravityFromOrientation(event.beta, event.gamma, !!event.absolute);
+    updateGravityFromOrientation(e.beta, e.gamma, !!e.absolute);
   }
 
   function startOrientation() {
@@ -388,7 +351,8 @@
   }
 
   async function requestOrientationPermission() {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
       try {
         const permission = await DeviceOrientationEvent.requestPermission();
         if (permission === 'granted') {
@@ -397,7 +361,7 @@
         } else {
           overlay.querySelector('p').textContent = 'Permission denied. Tilt controls are unavailable.';
         }
-      } catch (error) {
+      } catch (_) {
         overlay.querySelector('p').textContent = 'Permission denied. Tilt controls are unavailable.';
       }
     } else {
@@ -406,73 +370,61 @@
     }
   }
 
-  function screenRectToDivALocal(rect) {
-    const aRect = divA.getBoundingClientRect();
-    const aCx = aRect.left + aRect.width / 2;
-    const aCy = aRect.top + aRect.height / 2;
-    const rCx = rect.left + rect.width / 2;
-    const rCy = rect.top + rect.height / 2;
+  permBtn.addEventListener('click', requestOrientationPermission);
 
-    const rad = -snapAngle * Math.PI / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-    const dx = rCx - aCx;
-    const dy = rCy - aCy;
-    const lx = dx * cos - dy * sin;
-    const ly = dx * sin + dy * cos;
+  if (typeof DeviceOrientationEvent === 'undefined' ||
+      typeof DeviceOrientationEvent.requestPermission !== 'function') {
+    overlay.classList.add('hidden');
+    startOrientation();
+  }
 
-    const quarterTurns = (((Math.round(snapAngle / 90) % 4) + 4) % 4);
-    const swapWH = quarterTurns % 2 === 1;
-    const localW = swapWH ? rect.height : rect.width;
-    const localH = swapWH ? rect.width : rect.height;
-
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  OSTACOLI
+  //  div-a non ruota → le coordinate schermo degli ostacoli coincidono
+  //  con le coordinate locali di div-a, basta sottrarre l'offset di canvas.
+  // ═══════════════════════════════════════════════════════════════════════════
+  function screenRectToCanvas(rect) {
+    const canvasRect = canvas.getBoundingClientRect();
     return {
-      x: lx - localW / 2 + canvasW / 2,
-      y: ly - localH / 2 + canvasH / 2,
-      w: localW,
-      h: localH,
+      x: rect.left - canvasRect.left,
+      y: rect.top  - canvasRect.top,
+      w: rect.width,
+      h: rect.height,
     };
   }
 
   function observeObstacle(el) {
     if (obstacleROMap.has(el)) return;
-    const observer = new ResizeObserver(() => {
-      obstaclesDirty = true;
-    });
-    observer.observe(el);
-    obstacleROMap.set(el, observer);
+    const obs = new ResizeObserver(() => { obstaclesDirty = true; });
+    obs.observe(el);
+    obstacleROMap.set(el, obs);
   }
 
   function unobserveObstacle(el) {
-    const observer = obstacleROMap.get(el);
-    if (!observer) return;
-    observer.disconnect();
+    const obs = obstacleROMap.get(el);
+    if (!obs) return;
+    obs.disconnect();
     obstacleROMap.delete(el);
-  }
-
-  function collectObstacleElements() {
-    const allElements = new Set();
-    for (const sel of obstacleSelectors) {
-      document.querySelectorAll(sel).forEach((el) => allElements.add(el));
-    }
-    document.querySelectorAll('.obstacle').forEach((el) => allElements.add(el));
-    return allElements;
   }
 
   function refreshObstacles() {
     if (!obstaclesDirty) return;
     obstaclesDirty = false;
-    obstacleRects = [];
+    obstacleRects  = [];
 
-    const elements = collectObstacleElements();
+    const elements = new Set();
+    for (const sel of obstacleSelectors) {
+      document.querySelectorAll(sel).forEach(el => elements.add(el));
+    }
+    document.querySelectorAll('.obstacle').forEach(el => elements.add(el));
 
+    // Rimuovi observer per elementi non più presenti
     for (const tracked of Array.from(obstacleROMap.keys())) {
       if (!tracked.isConnected || !elements.has(tracked)) unobserveObstacle(tracked);
     }
 
     for (const el of elements) {
-      const rect = el.getBoundingClientRect();
-      obstacleRects.push(screenRectToDivALocal(rect));
+      obstacleRects.push(screenRectToCanvas(el.getBoundingClientRect()));
       observeObstacle(el);
     }
   }
@@ -484,22 +436,16 @@
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  FISICA
+  // ═══════════════════════════════════════════════════════════════════════════
   function resolveWallCollision() {
     const r = ball.radius;
-    if (ball.x - r < 0) {
-      ball.x = r;
-      ball.vx = Math.abs(ball.vx) * RESTITUTION;
-    }
-    if (ball.x + r > canvasW) {
-      ball.x = canvasW - r;
-      ball.vx = -Math.abs(ball.vx) * RESTITUTION;
-    }
-    if (ball.y - r < 0) {
-      ball.y = r;
-      ball.vy = Math.abs(ball.vy) * RESTITUTION;
-    }
+    if (ball.x - r < 0)       { ball.x = r;            ball.vx =  Math.abs(ball.vx) * RESTITUTION; }
+    if (ball.x + r > canvasW) { ball.x = canvasW - r;   ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+    if (ball.y - r < 0)       { ball.y = r;             ball.vy =  Math.abs(ball.vy) * RESTITUTION; }
     if (ball.y + r > canvasH) {
-      ball.y = canvasH - r;
+      ball.y  = canvasH - r;
       ball.vy = -Math.abs(ball.vy) * RESTITUTION;
       ball.vx *= FRICTION;
     }
@@ -507,16 +453,16 @@
 
   function resolveObstacleCollisions() {
     for (const obs of obstacleRects) {
-      const cx = Math.max(obs.x, Math.min(ball.x, obs.x + obs.w));
-      const cy = Math.max(obs.y, Math.min(ball.y, obs.y + obs.h));
-      const dx = ball.x - cx;
-      const dy = ball.y - cy;
+      const cx   = Math.max(obs.x, Math.min(ball.x, obs.x + obs.w));
+      const cy   = Math.max(obs.y, Math.min(ball.y, obs.y + obs.h));
+      const dx   = ball.x - cx;
+      const dy   = ball.y - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < ball.radius && dist > 0) {
         const pen = ball.radius - dist;
-        const nx = dx / dist;
-        const ny = dy / dist;
+        const nx  = dx / dist;
+        const ny  = dy / dist;
         ball.x += nx * pen;
         ball.y += ny * pen;
         const dot = ball.vx * nx + ball.vy * ny;
@@ -536,18 +482,21 @@
     ball.vy += gravity.y * safeDt;
     ball.vx *= DAMPING;
     ball.vy *= DAMPING;
-    ball.x += ball.vx * safeDt;
-    ball.y += ball.vy * safeDt;
+    ball.x  += ball.vx * safeDt;
+    ball.y  += ball.vy * safeDt;
     resolveWallCollision();
     resolveObstacleCollisions();
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  RENDERING
+  // ═══════════════════════════════════════════════════════════════════════════
   function render() {
     ctx.clearRect(0, 0, canvasW, canvasH);
 
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.35)';
-    ctx.shadowBlur = 12;
+    ctx.shadowColor   = 'rgba(0,0,0,0.35)';
+    ctx.shadowBlur    = 12;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 4;
 
@@ -555,9 +504,9 @@
       ball.x - ball.radius * 0.3, ball.y - ball.radius * 0.3, ball.radius * 0.1,
       ball.x, ball.y, ball.radius
     );
-    grad.addColorStop(0, '#a0cfff');
+    grad.addColorStop(0,   '#a0cfff');
     grad.addColorStop(0.5, '#4f8ef7');
-    grad.addColorStop(1, '#1a3a7a');
+    grad.addColorStop(1,   '#1a3a7a');
 
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
@@ -567,11 +516,26 @@
 
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth   = 1;
     for (const obs of obstacleRects) ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
     ctx.restore();
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  VISIBILITY
+  // ═══════════════════════════════════════════════════════════════════════════
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      lastTime = null;
+    } else if (!destroyed && rafId === null) {
+      rafId = requestAnimationFrame(loop);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MAIN LOOP
+  // ═══════════════════════════════════════════════════════════════════════════
   function loop(timestamp) {
     if (destroyed) return;
     rafId = requestAnimationFrame(loop);
@@ -587,91 +551,64 @@
     updateDebug();
   }
 
-  function init() {
-    if (initialized || destroyed) return;
-    initialized = true;
-    resizeCanvas();
-    ball.x = canvasW / 2;
-    ball.y = canvasH / 4;
-    ball.vx = 1.5;
-    ball.vy = 0;
-    rafId = requestAnimationFrame(loop);
-  }
-
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  RESIZE OBSERVER
+  // ═══════════════════════════════════════════════════════════════════════════
   const layoutRO = new ResizeObserver(() => {
     const w = divA.offsetWidth;
     const h = divA.offsetHeight;
     if (w === 0 || h === 0) return;
-
-    const nowPortrait = h > w;
-    if (nowPortrait !== isPortrait) {
-      const delta = rawGamma < 0 ? -90 : 90;
-      applySnapAngle(snapAngle + delta);
-      isPortrait = nowPortrait;
-    }
-
     resizeCanvas();
     if (!initialized) init();
   });
   layoutRO.observe(divA);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MUTATION OBSERVER ostacoli
+  // ═══════════════════════════════════════════════════════════════════════════
   const obstacleMO = new MutationObserver((mutations) => {
     let changed = false;
-    for (const mutation of mutations) {
-      mutation.addedNodes.forEach((node) => {
+    for (const m of mutations) {
+      m.removedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
-        if (node.matches && node.matches('.obstacle')) changed = true;
-        if (node.querySelectorAll) {
-          const descendants = node.querySelectorAll('.obstacle');
-          if (descendants.length) changed = true;
-        }
+        if (node.matches?.('.obstacle')) { unobserveObstacle(node); changed = true; }
+        node.querySelectorAll?.('.obstacle').forEach((el) => unobserveObstacle(el));
       });
-      mutation.removedNodes.forEach((node) => {
+      m.addedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
-        if (node.matches && node.matches('.obstacle')) {
-          unobserveObstacle(node);
-          changed = true;
-        }
-        if (node.querySelectorAll) {
-          node.querySelectorAll('.obstacle').forEach((el) => unobserveObstacle(el));
-          if (node.querySelectorAll('.obstacle').length) changed = true;
-        }
+        if (node.matches?.('.obstacle') || node.querySelectorAll?.('.obstacle').length) changed = true;
       });
     }
     if (changed) obstaclesDirty = true;
   });
   obstacleMO.observe(obstaclesLayer, { childList: true, subtree: true });
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      lastTime = null;
-    } else if (!destroyed && rafId === null) {
-      rafId = requestAnimationFrame(loop);
-    }
-  });
-
-  permBtn.addEventListener('click', requestOrientationPermission);
-
-  if (typeof DeviceOrientationEvent === 'undefined' || typeof DeviceOrientationEvent.requestPermission !== 'function') {
-    overlay.classList.add('hidden');
-    startOrientation();
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  INIT
+  // ═══════════════════════════════════════════════════════════════════════════
+  function init() {
+    if (initialized || destroyed) return;
+    initialized = true;
+    resizeCanvas();
+    ball.x  = canvasW / 2;
+    ball.y  = canvasH / 4;
+    ball.vx = 1.5;
+    ball.vy = 0;
+    rafId = requestAnimationFrame(loop);
   }
 
+  // Fallback se ResizeObserver non parte (es. display:none all'avvio)
   setTimeout(init, 100);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CLEANUP
+  // ═══════════════════════════════════════════════════════════════════════════
   function destroy() {
     destroyed = true;
-    if (rafId !== null) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     layoutRO.disconnect();
     obstacleMO.disconnect();
-    for (const observer of obstacleROMap.values()) observer.disconnect();
+    for (const obs of obstacleROMap.values()) obs.disconnect();
     obstacleROMap.clear();
     window.removeEventListener('deviceorientationabsolute', onDeviceOrientationAbsolute);
     window.removeEventListener('deviceorientation', onDeviceOrientation);
@@ -679,24 +616,17 @@
 
   window.addEventListener('pagehide', destroy, { once: true });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  PUBLIC API
+  // ═══════════════════════════════════════════════════════════════════════════
   window.physicsApp = {
     addObstacle,
-    getBall: () => ({ ...ball }),
-    stop: () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      lastTime = null;
-    },
-    start: () => {
-      if (!destroyed && rafId === null) {
-        lastTime = null;
-        rafId = requestAnimationFrame(loop);
-      }
-    },
+    getBall:  () => ({ ...ball }),
+    stop:     () => { if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; } lastTime = null; },
+    start:    () => { if (!destroyed && rafId === null) { lastTime = null; rafId = requestAnimationFrame(loop); } },
     destroy,
   };
+
 })();
 </script>
 </body>
