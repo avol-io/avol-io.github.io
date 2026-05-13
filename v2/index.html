@@ -21,7 +21,6 @@
     inset: 0;
   }
 
-  /* div-b ruota per stare allineato al mondo reale (counter-rotate rispetto al tilt) */
   #div-b {
     position: absolute;
     top: 50%;
@@ -156,18 +155,17 @@
   const WIN_ACCEL_SCALE  = 0.18;
   const WIN_LOWPASS      = 0.12;
   const MAX_WIN_DELTA    = 40;
-  // Timeout oltre il quale si smette di preferire deviceorientationabsolute
   const ABS_EVENT_TIMEOUT_MS = 500;
 
   // ─── DOM refs ────────────────────────────────────────────────────────────────
-  const divA          = document.getElementById('div-a');
-  const divB          = document.getElementById('div-b');
-  const canvas        = document.getElementById('ball-canvas');
-  const ctx           = canvas.getContext('2d');
-  const overlay       = document.getElementById('permission-overlay');
-  const permBtn       = document.getElementById('permission-btn');
-  const debugEl       = document.getElementById('debug-info');
-  const arrowA        = document.getElementById('gravity-arrow-a');
+  const divA           = document.getElementById('div-a');
+  const divB           = document.getElementById('div-b');
+  const canvas         = document.getElementById('ball-canvas');
+  const ctx            = canvas.getContext('2d');
+  const overlay        = document.getElementById('permission-overlay');
+  const permBtn        = document.getElementById('permission-btn');
+  const debugEl        = document.getElementById('debug-info');
+  const arrowA         = document.getElementById('gravity-arrow-a');
   const obstaclesLayer = document.getElementById('obstacles-layer');
 
   if (!ctx) {
@@ -177,9 +175,10 @@
   }
 
   // ─── Stato mondo ─────────────────────────────────────────────────────────────
-  let canvasW = 0, canvasH = 0;
-  let lastTime = null;
-  let rafId    = null;
+  let canvasW     = 0;
+  let canvasH     = 0;
+  let lastTime    = null;
+  let rafId       = null;
   let initialized = false;
   let destroyed   = false;
 
@@ -190,9 +189,9 @@
   const ball = { x: 0, y: 0, vx: 0, vy: 0, radius: BALL_RADIUS };
 
   // ─── Sensori ─────────────────────────────────────────────────────────────────
-  let rawBeta   = 0;
-  let rawGamma  = 0;
-  let usingGyro = false;
+  let rawBeta               = 0;
+  let rawGamma              = 0;
+  let usingGyro             = false;
   let orientationIsAbsolute = false;
   let lastAbsoluteEventTs   = 0;
 
@@ -204,7 +203,8 @@
 
   let prevScreenX = screenAPIAvailable ? window.screenX : 0;
   let prevScreenY = screenAPIAvailable ? window.screenY : 0;
-  let winVelX = 0, winVelY = 0;
+  let winVelX = 0;
+  let winVelY = 0;
 
   // ─── Ostacoli ────────────────────────────────────────────────────────────────
   const obstacleSelectors = [];
@@ -217,84 +217,107 @@
   // ═══════════════════════════════════════════════════════════════════════════
   function updateDebug() {
     debugEl.innerHTML =
-      `beta (raw): ${rawBeta.toFixed(1)}°<br>` +
-      `gamma (raw): ${rawGamma.toFixed(1)}°<br>` +
+      `beta: ${rawBeta.toFixed(1)}° gamma: ${rawGamma.toFixed(1)}°<br>` +
       `gravity.x: ${gravity.x.toFixed(5)}<br>` +
       `gravity.y: ${gravity.y.toFixed(5)}<br>` +
       `ball vx: ${ball.vx.toFixed(2)} vy: ${ball.vy.toFixed(2)}<br>` +
+      `canvas: ${canvasW}×${canvasH}<br>` +
       `source: ${usingGyro ? '● gyro' : (screenAPIAvailable ? '○ window' : '○ static')}<br>` +
-      `absOrientation: ${orientationIsAbsolute}<br>` +
-      `v7`;
+      `absOri: ${orientationIsAbsolute} | v8`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  CANVAS RESIZE
+  //
+  //  Riceve le dimensioni PRECEDENTI del canvas (prima del resize) per poter
+  //  rimappare la posizione della pallina dallo spazio schermo.
+  //  Se prevW/prevH sono 0 (prima init) la palla viene posizionata al centro.
   // ═══════════════════════════════════════════════════════════════════════════
-  function resizeCanvas() {
+  function resizeCanvas(prevW, prevH) {
     const w   = divA.offsetWidth;
     const h   = divA.offsetHeight;
-    const dpr = window.devicePixelRatio || 1;
+    if (w === 0 || h === 0) return;
 
+    const dpr = window.devicePixelRatio || 1;
     canvas.width  = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
     canvas.style.width  = `${w}px`;
     canvas.style.height = `${h}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    if (prevW > 0 && prevH > 0) {
+      // ── RIMAPPATURA POSIZIONE IN COORDINATE SCHERMO ──────────────────────
+      // La palla si trovava in (ball.x, ball.y) nel vecchio canvas (prevW×prevH).
+      // Convertiamo quelle coordinate in coordinate schermo (normalizzate 0..1)
+      // e poi le mappiamo nelle nuove dimensioni canvas.
+      // Questo preserva la posizione percepita sul device dopo un orientation change.
+      const normX = ball.x / prevW;
+      const normY = ball.y / prevH;
+      ball.x = normX * w;
+      ball.y = normY * h;
+    } else {
+      ball.x = w / 2;
+      ball.y = h / 4;
+    }
+
+    // Clamp entro i bordi con il raggio
+    ball.x = Math.max(ball.radius, Math.min(w - ball.radius, ball.x));
+    ball.y = Math.max(ball.radius, Math.min(h - ball.radius, ball.y));
+
     canvasW = w;
     canvasH = h;
-
-    ball.x = Math.max(ball.radius, Math.min(canvasW - ball.radius, ball.x || canvasW / 2));
-    ball.y = Math.max(ball.radius, Math.min(canvasH - ball.radius, ball.y || canvasH / 4));
     obstaclesDirty = true;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  DIV-B TRANSFORM
   //
-  //  div-a è fisso e non ruota mai.
-  //  div-b ruota di -deviceAngle (= -rawGamma) per restare allineato
-  //  al mondo reale: quando il telefono si inclina a sinistra (gamma < 0),
-  //  il box ruota in senso orario sullo schermo, rimanendo "in bolla".
-  //  La freccia ↓ all'interno punta sempre verso il basso reale.
-  //  coverScale assicura che il box copra sempre div-a nonostante la rotazione.
+  //  div-a è fisso. div-b ruota di -rawGamma per restare allineato al mondo:
+  //  inclinando il device a sinistra (gamma < 0), worldAngle > 0,
+  //  il box ruota in senso orario sullo schermo → la freccia ↓ punta giù nel
+  //  mondo reale.
+  //
+  //  FIX rotazione illimitata: usiamo `rawGamma` direttamente senza clamp.
+  //  coverScale gestisce tutti gli angoli da 0° a 360° senza divisione per zero
+  //  grazie al guard `|| 1` sui denominatori.
   // ═══════════════════════════════════════════════════════════════════════════
   function coverScale(containerW, containerH, innerW, innerH, angleRad) {
     const a = Math.abs(Math.cos(angleRad));
     const b = Math.abs(Math.sin(angleRad));
-    const scaleX = containerW / (innerW * a + innerH * b);
-    const scaleY = containerH / (innerW * b + innerH * a);
-    return Math.min(scaleX, scaleY);
+    const denomX = (innerW * a + innerH * b) || 1;
+    const denomY = (innerW * b + innerH * a) || 1;
+    const scaleX = containerW / denomX;
+    const scaleY = containerH / denomY;
+    return Math.max(scaleX, scaleY); // max = cover (non min = contain)
   }
 
   function updateDivBTransform() {
-    // Rotazione opposta al tilt del device → box resta allineato al mondo
+    // Opposta al tilt → il box resta allineato al mondo
     const worldAngle = -rawGamma;
-    const rad  = worldAngle * Math.PI / 180;
-    const aW   = divA.offsetWidth;
-    const aH   = divA.offsetHeight;
-    const bW   = divB.offsetWidth;
-    const bH   = divB.offsetHeight;
+    const rad   = worldAngle * Math.PI / 180;
+    const aW    = divA.offsetWidth;
+    const aH    = divA.offsetHeight;
+    const bW    = divB.offsetWidth;
+    const bH    = divB.offsetHeight;
+    if (aW === 0 || aH === 0 || bW === 0 || bH === 0) return;
     const scale = coverScale(aW, aH, bW, bH, rad);
     divB.style.transform  = `translate(-50%, -50%) rotate(${worldAngle}deg) scale(${scale})`;
-    // L'indicatore freccia in basso resta ancorato allo schermo (invariante)
+    // L'indicatore freccia in basso counter-ruota per restare verticale
     arrowA.style.transform = `translateX(-50%) rotate(${-worldAngle}deg)`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  GRAVITÀ — MOBILE
-  //  Formula W3C per proiettare beta/gamma sul piano dello schermo.
-  //  Nessun snap: la gravità segue direttamente l'inclinazione del device.
   // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromOrientation(beta, gamma, absolute) {
-    rawBeta  = Number.isFinite(beta)  ? beta  : 0;
-    rawGamma = Number.isFinite(gamma) ? gamma : 0;
+    rawBeta               = Number.isFinite(beta)  ? beta  : 0;
+    rawGamma              = Number.isFinite(gamma) ? gamma : 0;
     orientationIsAbsolute = !!absolute;
 
     const bRad = rawBeta  * Math.PI / 180;
     const gRad = rawGamma * Math.PI / 180;
-    const gx = Math.sin(gRad) * GRAVITY_STRENGTH * 20;
-    const gy = Math.cos(gRad) * Math.sin(bRad) * GRAVITY_STRENGTH * 20;
+    const gx   = Math.sin(gRad) * GRAVITY_STRENGTH * 20;
+    const gy   = Math.cos(gRad) * Math.sin(bRad) * GRAVITY_STRENGTH * 20;
 
     gravity.x = gx;
     gravity.y = gy;
@@ -308,7 +331,7 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  GRAVITÀ — DESKTOP (movimento finestra)
+  //  GRAVITÀ — DESKTOP
   // ═══════════════════════════════════════════════════════════════════════════
   function updateGravityFromWindow() {
     if (!screenAPIAvailable) {
@@ -330,11 +353,9 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  SENSOR SETUP
-  //  Preferisce deviceorientationabsolute; cade su deviceorientation
-  //  se non arriva nessun evento assoluto per ABS_EVENT_TIMEOUT_MS ms.
   // ═══════════════════════════════════════════════════════════════════════════
   function onDeviceOrientationAbsolute(e) {
-    usingGyro = true;
+    usingGyro           = true;
     lastAbsoluteEventTs = performance.now();
     updateGravityFromOrientation(e.beta, e.gamma, true);
   }
@@ -380,14 +401,13 @@
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  OSTACOLI
-  //  div-a non ruota → le coordinate schermo degli ostacoli coincidono
-  //  con le coordinate locali di div-a, basta sottrarre l'offset di canvas.
+  //  div-a non ruota mai → coordinate schermo == coordinate canvas
   // ═══════════════════════════════════════════════════════════════════════════
   function screenRectToCanvas(rect) {
-    const canvasRect = canvas.getBoundingClientRect();
+    const cr = canvas.getBoundingClientRect();
     return {
-      x: rect.left - canvasRect.left,
-      y: rect.top  - canvasRect.top,
+      x: rect.left - cr.left,
+      y: rect.top  - cr.top,
       w: rect.width,
       h: rect.height,
     };
@@ -418,7 +438,6 @@
     }
     document.querySelectorAll('.obstacle').forEach(el => elements.add(el));
 
-    // Rimuovi observer per elementi non più presenti
     for (const tracked of Array.from(obstacleROMap.keys())) {
       if (!tracked.isConnected || !elements.has(tracked)) unobserveObstacle(tracked);
     }
@@ -458,7 +477,6 @@
       const dx   = ball.x - cx;
       const dy   = ball.y - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
-
       if (dist < ball.radius && dist > 0) {
         const pen = ball.radius - dist;
         const nx  = dx / dist;
@@ -539,11 +557,9 @@
   function loop(timestamp) {
     if (destroyed) return;
     rafId = requestAnimationFrame(loop);
-
     if (lastTime === null) lastTime = timestamp;
-    const dt = timestamp - lastTime;
-    lastTime = timestamp;
-
+    const dt  = timestamp - lastTime;
+    lastTime  = timestamp;
     if (!usingGyro) updateGravityFromWindow();
     refreshObstacles();
     updatePhysics(dt);
@@ -552,13 +568,22 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  RESIZE OBSERVER
+  //  LAYOUT RESIZE OBSERVER
+  //
+  //  Ad ogni resize passa le dimensioni PRECEDENTI del canvas a resizeCanvas()
+  //  così la palla può essere rimappata correttamente.
+  //  Se la dimensione non è cambiata (es. solo pixel ratio) non rimappa.
   // ═══════════════════════════════════════════════════════════════════════════
   const layoutRO = new ResizeObserver(() => {
     const w = divA.offsetWidth;
     const h = divA.offsetHeight;
     if (w === 0 || h === 0) return;
-    resizeCanvas();
+
+    // Passa le dimensioni precedenti per il remap della pallina
+    const prevW = canvasW;
+    const prevH = canvasH;
+    resizeCanvas(prevW, prevH);
+
     if (!initialized) init();
   });
   layoutRO.observe(divA);
@@ -589,9 +614,7 @@
   function init() {
     if (initialized || destroyed) return;
     initialized = true;
-    resizeCanvas();
-    ball.x  = canvasW / 2;
-    ball.y  = canvasH / 4;
+    resizeCanvas(0, 0); // prima init: palla al centro
     ball.vx = 1.5;
     ball.vy = 0;
     rafId = requestAnimationFrame(loop);
