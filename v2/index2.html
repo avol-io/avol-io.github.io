@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Gravity Debug</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0d0d;
+      color: #fff;
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100dvh;
+      padding: 20px 16px;
+      gap: 20px;
+    }
+    h1 { font-size: 1.1rem; opacity: .7; }
+    #vals {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .val-box {
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .val-box .label { font-size: .72rem; opacity: .55; margin-bottom: 4px; }
+    .val-box .number {
+      font-size: 1.4rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #e03030;
+    }
+    #arrowWrap { position: relative; width: 200px; height: 200px; }
+    #arrowCanvas {
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.15);
+    }
+    #arrowLabel {
+      position: absolute; bottom: -22px; left: 0; right: 0;
+      text-align: center; font-size: .72rem; opacity: .5;
+    }
+    #log {
+      width: 100%; max-width: 360px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: .72rem; font-family: monospace; line-height: 1.6;
+      max-height: 160px; overflow-y: auto; opacity: .8;
+    }
+    #permOverlay {
+      position: fixed; inset: 0; z-index: 100;
+      background: rgba(0,0,0,.85);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; color: #fff; text-align: center; padding: 24px;
+    }
+    #permOverlay p { font-size: .9rem; opacity: .7; max-width: 280px; line-height: 1.5; }
+    #permBtn {
+      padding: 12px 32px; border: none; border-radius: 50px;
+      background: #e03030; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+    }
+    #snapBtn {
+      padding: 10px 24px; border: 1px solid rgba(255,255,255,.2);
+      border-radius: 8px; background: transparent; color: #fff;
+      font-size: .85rem; cursor: pointer; width: 100%; max-width: 360px;
+    }
+    #snapBtn:active { background: rgba(255,255,255,.1); }
+  </style>
+</head>
+<body>
+
+<div id="permOverlay" style="display:none">
+  <p>Per leggere i sensori di orientamento è necessario il permesso.</p>
+  <button id="permBtn">Abilita sensori</button>
+</div>
+
+<h1>🧭 Gravity Debug v3</h1>
+
+<div id="vals">
+  <div class="val-box"><div class="label">beta (avanti/indietro)</div><div class="number" id="vBeta">—</div></div>
+  <div class="val-box"><div class="label">gamma (sinistra/destra)</div><div class="number" id="vGamma">—</div></div>
+  <div class="val-box"><div class="label">orientation angle</div><div class="number" id="vAngle">—</div></div>
+  <div class="val-box"><div class="label">gVec (x, y)</div><div class="number" id="vGvec">—</div></div>
+</div>
+
+<div id="arrowWrap">
+  <canvas id="arrowCanvas" width="200" height="200"></canvas>
+  <div id="arrowLabel">direzione gravità calcolata</div>
+</div>
+
+<button id="snapBtn">📌 Registra posizione nel log</button>
+
+<div id="log">Muovi il dispositivo per vedere i valori…</div>
+
+<script>
+const elBeta  = document.getElementById('vBeta');
+const elGamma = document.getElementById('vGamma');
+const elAngle = document.getElementById('vAngle');
+const elGvec  = document.getElementById('vGvec');
+const logEl   = document.getElementById('log');
+const ac      = document.getElementById('arrowCanvas');
+const actx    = ac.getContext('2d');
+
+const gVec = { x: 0, y: 0 };
+let lastBeta = 0, lastGamma = 0;
+
+function getOrientAngle() {
+  if (screen.orientation && screen.orientation.angle !== undefined)
+    return screen.orientation.angle;
+  return typeof window.orientation === 'number' ? Math.abs(window.orientation) : 0;
+}
+
+function onOrientation(e) {
+  const beta  = e.beta  ?? 0;
+  const gamma = e.gamma ?? 0;
+  lastBeta  = beta;
+  lastGamma = gamma;
+
+  const angle = getOrientAngle();
+
+  // Mapping esplicito per ogni orientamento, senza variabili intermedie condivise
+  switch (angle) {
+    case 0:   gVec.x =  beta/90;  gVec.y = -gamma/90; break;
+case 90:  gVec.x = gamma/90; gVec.y =  beta/90;  break;
+case 270: gVec.x =  -gamma/90; gVec.y = -beta/90;  break;
+case 180: gVec.x = -beta/90;  gVec.y =  gamma/90; break;
+    default:
+      gVec.x =  beta  / 90;
+      gVec.y =  gamma / 90;
+  }
+
+  // clamp a [-1, 1]
+  gVec.x = Math.max(-1, Math.min(1, gVec.x));
+  gVec.y = Math.max(-1, Math.min(1, gVec.y));
+
+  elBeta.textContent  = beta.toFixed(1) + '°';
+  elGamma.textContent = gamma.toFixed(1) + '°';
+  elAngle.textContent = angle + '°';
+  elGvec.textContent  = `${gVec.x.toFixed(2)}, ${gVec.y.toFixed(2)}`;
+
+  drawArrow();
+}
+
+function drawArrow() {
+  const w = 200, h = 200, cx = 100, cy = 100;
+  actx.clearRect(0, 0, w, h);
+
+  actx.strokeStyle = 'rgba(255,255,255,0.15)';
+  actx.lineWidth = 1;
+  actx.beginPath(); actx.moveTo(cx, 0); actx.lineTo(cx, h); actx.stroke();
+  actx.beginPath(); actx.moveTo(0, cy); actx.lineTo(w, cy); actx.stroke();
+
+  const len = Math.sqrt(gVec.x * gVec.x + gVec.y * gVec.y);
+  if (len < 0.01) return;
+
+  const scale = 70;
+  const ex = cx + gVec.x * scale;
+  const ey = cy + gVec.y * scale;
+  const arrowAngle = Math.atan2(gVec.y, gVec.x);
+  const headLen = 14;
+
+  actx.strokeStyle = '#e03030';
+  actx.lineWidth = 3;
+  actx.lineCap = 'round';
+  actx.beginPath();
+  actx.moveTo(cx, cy);
+  actx.lineTo(ex, ey);
+  actx.stroke();
+
+  actx.fillStyle = '#e03030';
+  actx.beginPath();
+  actx.moveTo(ex, ey);
+  actx.lineTo(ex - headLen * Math.cos(arrowAngle - 0.4), ey - headLen * Math.sin(arrowAngle - 0.4));
+  actx.lineTo(ex - headLen * Math.cos(arrowAngle + 0.4), ey - headLen * Math.sin(arrowAngle + 0.4));
+  actx.closePath();
+  actx.fill();
+
+  actx.fillStyle = 'rgba(255,255,255,0.4)';
+  actx.beginPath();
+  actx.arc(cx, cy, 4, 0, Math.PI * 2);
+  actx.fill();
+}
+
+document.getElementById('snapBtn').addEventListener('click', () => {
+  const angle = getOrientAngle();
+  const line = `[${angle}°] β=${lastBeta.toFixed(1)} γ=${lastGamma.toFixed(1)} → gVec(${gVec.x.toFixed(2)}, ${gVec.y.toFixed(2)})`;
+  const div = document.createElement('div');
+  div.textContent = line;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+});
+
+function startOrientation() {
+  window.addEventListener('deviceorientation', onOrientation);
+  drawArrow();
+}
+
+if (typeof DeviceOrientationEvent !== 'undefined' &&
+    typeof DeviceOrientationEvent.requestPermission === 'function') {
+  const ov = document.getElementById('permOverlay');
+  ov.style.display = 'flex';
+  document.getElementById('permBtn').addEventListener('click', () => {
+    DeviceOrientationEvent.requestPermission()
+      .then(s => { ov.style.display = 'none'; if (s === 'granted') startOrientation(); })
+      .catch(() => { ov.style.display = 'none'; });
+  });
+} else if (window.DeviceOrientationEvent) {
+  startOrientation();
+}
+
+drawArrow();
+</script>
+</body>
+</html>
