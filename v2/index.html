@@ -54,6 +54,7 @@
     #permBtn:hover { background: #c02020; }
     #permBtn:active { transform: translateX(-50%) translateY(1px); }
 
+    /* ── Physics controls ───────────────────────── */
     #controls {
       position: fixed;
       bottom: 16px;
@@ -107,32 +108,123 @@
     }
     #resetBtn:hover { background: rgba(255,255,255,.1); }
 
+    /* ── Debug / Calibration panel ──────────────── */
     #calib {
       position: fixed;
       top: 16px;
       left: 16px;
       z-index: 50;
-      background: rgba(0,0,0,.65);
+      background: rgba(0,0,0,.72);
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255,255,255,.12);
       border-radius: 12px;
       padding: 10px 12px;
       color: #fff;
       font-size: .76rem;
-      max-width: 220px;
+      width: 216px;
+      user-select: none;
     }
+
+    #calibOrient {
+      font-weight: 700;
+      font-size: .8rem;
+      margin-bottom: 1px;
+    }
+
+    #calibSensorVals {
+      font-size: .68rem;
+      opacity: .55;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 8px;
+      letter-spacing: .02em;
+    }
+
+    /* Two arrow canvases side by side */
+    .arrows-row {
+      display: flex;
+      gap: 8px;
+      justify-content: space-around;
+      margin-bottom: 8px;
+    }
+
+    .arrow-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .arrow-label {
+      font-size: .63rem;
+      opacity: .65;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    .arrow-canvas {
+      border-radius: 50%;
+      display: block;
+    }
+
+    #calibText {
+      font-size: .7rem;
+      opacity: .75;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    /* Wizard */
+    #calibWizard {
+      display: none;
+      background: rgba(255,255,255,.06);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      font-size: .74rem;
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    .wiz-icon { font-size: 1.5rem; margin-bottom: 3px; }
+
+    .wiz-bar {
+      margin-top: 7px;
+      height: 4px;
+      background: rgba(255,255,255,.15);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .wiz-bar-fill {
+      height: 100%;
+      background: #e03030;
+      width: 0%;
+      border-radius: 4px;
+    }
+
+    .wiz-done { color: #4caf50; font-weight: 700; font-size: .8rem; }
+    .wiz-warn { color: #e5a020; font-weight: 700; }
+
+    /* Buttons */
+    #calibBtns {
+      display: flex;
+      gap: 6px;
+    }
+
     #calib button {
-      margin-top: 8px;
-      width: 100%;
-      padding: 6px;
+      flex: 1;
+      padding: 6px 4px;
       border: 1px solid rgba(255,255,255,.2);
       border-radius: 6px;
       background: transparent;
       color: #fff;
       cursor: pointer;
-      font-size: .78rem;
+      font-size: .72rem;
+      transition: background .15s;
     }
-    #calib button:hover { background: rgba(255,255,255,.1); }
+    #calib button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+    #calib button:disabled { opacity: .35; cursor: default; }
+    #calibStart { border-color: rgba(224,48,48,.45) !important; }
+    #calibStart:hover:not(:disabled) { background: rgba(224,48,48,.18) !important; }
   </style>
 </head>
 <body>
@@ -142,11 +234,32 @@
   <button id="permBtn" class="obstacle">🔄 Abilita sensori</button>
 </div>
 
+<!-- ── Debug panel ─────────────────────────── -->
 <div id="calib">
+  <div id="calibOrient">Orientamento: —</div>
+  <div id="calibSensorVals">β —°  γ —°</div>
+
+  <div class="arrows-row">
+    <div class="arrow-cell">
+      <div class="arrow-label">📡 Grezzo<br>(W3C)</div>
+      <canvas class="arrow-canvas" id="arrowRaw" width="72" height="72"></canvas>
+    </div>
+    <div class="arrow-cell">
+      <div class="arrow-label">⚽ Calibrato<br>(gVec)</div>
+      <canvas class="arrow-canvas" id="arrowCal" width="72" height="72"></canvas>
+    </div>
+  </div>
+
   <div id="calibText">Calibrazione: neutra</div>
-  <button id="calibReset">Reset calibrazione</button>
+  <div id="calibWizard"></div>
+
+  <div id="calibBtns">
+    <button id="calibReset">↺ Reset</button>
+    <button id="calibStart">🎯 Ricalibra</button>
+  </div>
 </div>
 
+<!-- ── Physics controls ───────────────────── -->
 <details id="controls" open>
   <summary>Fisica</summary>
   <div class="ctrl-body">
@@ -171,57 +284,52 @@
 </details>
 
 <script>
-const CFG = {
-  gravity: 980,
-  restitution: 0.72,
-  friction: 0.985,
-  radius: 22,
-};
-
+// ═══════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════
+const CFG = { gravity: 980, restitution: 0.72, friction: 0.985, radius: 22 };
 const LS_KEY = 'ball-gravity-calibration-v1';
+const DEFAULT_CAL = { xSign: 1, ySign: 1, swapXY: false };
 
-const DEFAULT_CAL = {
-  xSign: 1,
-  ySign: 1,
-  swapXY: false,
-};
-
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
 let CAL = loadCalibration();
-
 const gVec = { x: 0, y: 1 };
 const ball = { nx: 0.5, ny: 0.25, nvx: 0, nvy: 0 };
 let obstacles = [];
-
-const canvas = document.getElementById('physicsCanvas');
-const ctx = canvas.getContext('2d');
-const world = document.getElementById('world');
 let W = 0, H = 0;
-
 let lastOrientAngle = getOrientAngle();
 
-function getOrientAngle() {
-  if (screen.orientation && screen.orientation.angle !== undefined) return screen.orientation.angle;
-  return typeof window.orientation === 'number' ? Math.abs(window.orientation) : 0;
-}
+let rawBeta  = 0;   // last raw DeviceOrientation beta  (deg)
+let rawGamma = 0;   // last raw DeviceOrientation gamma (deg)
+let sensorsActive = false;
+let calibBusy = false;
 
+// ═══════════════════════════════════════════════════════
+//  DOM REFS
+// ═══════════════════════════════════════════════════════
+const physCanvas  = document.getElementById('physicsCanvas');
+const ctx         = physCanvas.getContext('2d');
+const world       = document.getElementById('world');
+const arrowRawCtx = document.getElementById('arrowRaw').getContext('2d');
+const arrowCalCtx = document.getElementById('arrowCal').getContext('2d');
+
+// ═══════════════════════════════════════════════════════
+//  CALIBRATION – persistence
+// ═══════════════════════════════════════════════════════
 function loadCalibration() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return { ...DEFAULT_CAL };
-    const parsed = JSON.parse(raw);
-    return {
-      xSign: parsed.xSign ?? 1,
-      ySign: parsed.ySign ?? 1,
-      swapXY: parsed.swapXY ?? false,
-    };
-  } catch {
-    return { ...DEFAULT_CAL };
-  }
+    const p = JSON.parse(raw);
+    return { xSign: p.xSign ?? 1, ySign: p.ySign ?? 1, swapXY: !!p.swapXY };
+  } catch { return { ...DEFAULT_CAL }; }
 }
 
 function saveCalibration() {
   localStorage.setItem(LS_KEY, JSON.stringify(CAL));
-  renderCalibration();
+  renderCalibText();
 }
 
 function resetCalibration() {
@@ -229,99 +337,285 @@ function resetCalibration() {
   saveCalibration();
 }
 
-function renderCalibration() {
-  const text = [];
-  if (CAL.swapXY) text.push('swapXY');
-  if (CAL.xSign < 0) text.push('x-');
-  if (CAL.ySign < 0) text.push('y-');
-  document.getElementById('calibText').textContent = text.length ? `Calibrazione: ${text.join(', ')}` : 'Calibrazione: neutra';
+function renderCalibText() {
+  const parts = [];
+  if (CAL.swapXY)   parts.push('swapXY');
+  if (CAL.xSign < 0) parts.push('x−');
+  if (CAL.ySign < 0) parts.push('y−');
+  document.getElementById('calibText').textContent =
+    parts.length ? `Calibrazione: ${parts.join(', ')}` : 'Calibrazione: neutra';
 }
 
+// ── Apply calibration to raw beta/gamma ─────────────
+// Convention used by applyCalibration:
+//   x starts as beta/90, y starts as gamma/90.
+//   swapXY exchanges them → x = gamma/90, y = beta/90.
+//   Then xSign / ySign flip axes independently.
 function applyCalibration(beta, gamma) {
-  let x = beta / 90;
+  let x = beta  / 90;
   let y = gamma / 90;
-
   if (CAL.swapXY) [x, y] = [y, x];
   x *= CAL.xSign;
   y *= CAL.ySign;
-
   return { x, y };
 }
 
-function setCalibrationFromObserved(currentAngle, observedX, observedY) {
-  const ax = Math.abs(observedX);
-  const ay = Math.abs(observedY);
+// ═══════════════════════════════════════════════════════
+//  CALIBRATION WIZARD
+// ═══════════════════════════════════════════════════════
+const CALIB_DURATION = 2400; // ms per step
+const CALIB_TICK     = 80;   // ms sampling interval
 
-  CAL.swapXY = ax > ay ? false : false;
-
-  if (currentAngle === 0) {
-    CAL.xSign = observedX >= 0 ? 1 : -1;
-    CAL.ySign = observedY >= 0 ? 1 : -1;
-  } else if (currentAngle === 90) {
-    CAL.xSign = observedX >= 0 ? 1 : -1;
-    CAL.ySign = observedY >= 0 ? 1 : -1;
-  } else if (currentAngle === 180) {
-    CAL.xSign = observedX >= 0 ? 1 : -1;
-    CAL.ySign = observedY >= 0 ? 1 : -1;
-  } else if (currentAngle === 270) {
-    CAL.xSign = observedX >= 0 ? 1 : -1;
-    CAL.ySign = observedY >= 0 ? 1 : -1;
+function startCalibration() {
+  if (!sensorsActive) {
+    flashWizard('<span class="wiz-warn">⚠ Attiva prima i sensori!</span>', 1800);
+    return;
   }
+  if (calibBusy) return;
 
-  saveCalibration();
+  calibBusy = true;
+  setBtnState(true);
+
+  // ── Step 1: tilt RIGHT ───────────────────────────
+  runStep({
+    icon: '➡️',
+    msg:  'Inclina il telefono a <strong>DESTRA</strong><br>e tieni fermo',
+    onDone(s1) {
+      const b1 = mean(s1, 'beta');
+      const g1 = mean(s1, 'gamma');
+
+      // W3C standard: gamma is left/right, beta is fwd/back.
+      // Tilting RIGHT → gamma increases on most devices.
+      // We detect which raw axis is dominant and map it to gVec.x.
+      //
+      // In applyCalibration:
+      //   swapXY=false → x = beta,  y = gamma
+      //   swapXY=true  → x = gamma, y = beta
+      //
+      // So if gamma is dominant for right-tilt we need swapXY=true.
+      if (Math.abs(g1) >= Math.abs(b1)) {
+        CAL.swapXY = true;           // gamma → x axis
+        CAL.xSign  = g1 >= 0 ? 1 : -1;
+      } else {
+        CAL.swapXY = false;          // beta → x axis (unusual device)
+        CAL.xSign  = b1 >= 0 ? 1 : -1;
+      }
+
+      // ── Step 2: tilt DOWN ──────────────────────
+      runStep({
+        icon: '⬇️',
+        msg:  'Inclina verso il <strong>BASSO</strong><br>(fondo del telefono in avanti)',
+        onDone(s2) {
+          const b2 = mean(s2, 'beta');
+          const g2 = mean(s2, 'gamma');
+
+          // "Tilt down" (bottom of phone moves away from user) → beta increases.
+          // After swap:
+          //   swapXY=true  → y = beta * ySign → use b2 sign
+          //   swapXY=false → y = gamma * ySign (gamma barely moves when tilting down)
+          //                  fall back to whichever axis is dominant
+          if (CAL.swapXY) {
+            CAL.ySign = b2 >= 0 ? 1 : -1;
+          } else {
+            const dominant = Math.abs(b2) > Math.abs(g2) ? b2 : g2;
+            CAL.ySign = dominant >= 0 ? 1 : -1;
+          }
+
+          saveCalibration();
+          calibBusy = false;
+          setBtnState(false);
+          flashWizard('<span class="wiz-done">✓ Calibrazione completata!</span>', 2000);
+        }
+      });
+    }
+  });
 }
 
+/**
+ * Run a single calibration step.
+ * @param {object} opts  { icon, msg, onDone(samples[]) }
+ */
+function runStep({ icon, msg, onDone }) {
+  const samples = [];
+  let elapsed   = 0;
+
+  const wiz = document.getElementById('calibWizard');
+  wiz.style.display = 'block';
+  wiz.innerHTML = `
+    <div class="wiz-icon">${icon}</div>
+    <div>${msg}</div>
+    <div class="wiz-bar"><div class="wiz-bar-fill" id="wFill"></div></div>
+  `;
+
+  const timer = setInterval(() => {
+    samples.push({ beta: rawBeta, gamma: rawGamma });
+    elapsed += CALIB_TICK;
+    const fill = document.getElementById('wFill');
+    if (fill) fill.style.width = Math.min(100, elapsed / CALIB_DURATION * 100) + '%';
+    if (elapsed >= CALIB_DURATION) {
+      clearInterval(timer);
+      onDone(samples);
+    }
+  }, CALIB_TICK);
+}
+
+function flashWizard(html, duration = 1600) {
+  const wiz = document.getElementById('calibWizard');
+  wiz.style.display = 'block';
+  wiz.innerHTML = html;
+  setTimeout(() => { wiz.style.display = 'none'; }, duration);
+}
+
+function setBtnState(busy) {
+  document.getElementById('calibStart').disabled = busy;
+  document.getElementById('calibReset').disabled = busy;
+}
+
+function mean(arr, key) {
+  return arr.reduce((s, v) => s + v[key], 0) / arr.length;
+}
+
+// ═══════════════════════════════════════════════════════
+//  DEBUG DISPLAY
+// ═══════════════════════════════════════════════════════
+const ORIENT_NAMES = {
+  0:   'Verticale ↑',
+  90:  'Orizzontale →',
+  180: 'Capovolto ↓',
+  270: 'Orizzontale ←',
+};
+
+function updateDebug() {
+  const angle = getOrientAngle();
+  document.getElementById('calibOrient').textContent =
+    ORIENT_NAMES[angle] ?? `${angle}°`;
+
+  document.getElementById('calibSensorVals').textContent =
+    `β ${rawBeta.toFixed(1)}°  γ ${rawGamma.toFixed(1)}°`;
+
+  // "Grezzo" arrow: natural W3C mapping before calibration.
+  // gamma → horizontal (x), beta → vertical (y).
+  // This is the direction the ball *should* go on a standard device.
+  drawArrow(arrowRawCtx, 72, rawGamma / 90, rawBeta / 90, '#4a9eff');
+
+  // "Calibrato" arrow: actual gVec driving the physics.
+  drawArrow(arrowCalCtx, 72, gVec.x, gVec.y, '#e03030');
+}
+
+/**
+ * Draw a direction arrow inside a circular canvas.
+ * @param {CanvasRenderingContext2D} actx
+ * @param {number} size  canvas width/height (square)
+ * @param {number} x     direction x, range [-1, 1]
+ * @param {number} y     direction y, range [-1, 1]
+ * @param {string} color CSS color
+ */
+function drawArrow(actx, size, x, y, color) {
+  const cx = size / 2, cy = size / 2, r = size / 2 - 1;
+
+  actx.clearRect(0, 0, size, size);
+
+  // Background circle
+  actx.fillStyle = 'rgba(18,18,18,0.88)';
+  actx.beginPath();
+  actx.arc(cx, cy, r, 0, Math.PI * 2);
+  actx.fill();
+
+  // Crosshairs
+  actx.strokeStyle = 'rgba(255,255,255,0.1)';
+  actx.lineWidth = 1;
+  actx.beginPath();
+  actx.moveTo(cx - r + 4, cy); actx.lineTo(cx + r - 4, cy);
+  actx.moveTo(cx, cy - r + 4); actx.lineTo(cx, cy + r - 4);
+  actx.stroke();
+
+  const mag = Math.hypot(x, y);
+  if (mag < 0.04) {
+    // Stationary dot
+    actx.fillStyle = 'rgba(255,255,255,0.25)';
+    actx.beginPath();
+    actx.arc(cx, cy, 3, 0, Math.PI * 2);
+    actx.fill();
+    return;
+  }
+
+  const nx  = x / mag;
+  const ny  = y / mag;
+  const len = Math.min(mag, 1) * (r - 8);
+  const ex  = cx + nx * len;
+  const ey  = cy + ny * len;
+  const ang = Math.atan2(ny, nx);
+
+  // Shaft
+  actx.strokeStyle = color;
+  actx.lineWidth = 2.2;
+  actx.lineCap = 'round';
+  actx.beginPath();
+  actx.moveTo(cx, cy);
+  actx.lineTo(ex, ey);
+  actx.stroke();
+
+  // Arrowhead
+  const hw = 0.38; // half-angle of head (radians)
+  const hl = 9;    // head length (px)
+  actx.fillStyle = color;
+  actx.beginPath();
+  actx.moveTo(ex, ey);
+  actx.lineTo(ex - hl * Math.cos(ang - hw), ey - hl * Math.sin(ang - hw));
+  actx.lineTo(ex - hl * Math.cos(ang + hw), ey - hl * Math.sin(ang + hw));
+  actx.closePath();
+  actx.fill();
+}
+
+// ═══════════════════════════════════════════════════════
+//  SCREEN ORIENTATION HELPERS
+// ═══════════════════════════════════════════════════════
+function getOrientAngle() {
+  if (screen.orientation && screen.orientation.angle !== undefined)
+    return screen.orientation.angle;
+  return typeof window.orientation === 'number' ? Math.abs(window.orientation) : 0;
+}
+
+// ═══════════════════════════════════════════════════════
+//  RESIZE / ORIENTATION CHANGE
+// ═══════════════════════════════════════════════════════
 function onResize() {
   const newAngle = getOrientAngle();
-  const rotated = newAngle !== lastOrientAngle;
-
-  const r = world.getBoundingClientRect();
-  const newW = r.width;
-  const newH = r.height;
+  const rotated  = newAngle !== lastOrientAngle;
+  const wr = world.getBoundingClientRect();
+  const newW = wr.width, newH = wr.height;
 
   if (rotated) {
     const delta = ((newAngle - lastOrientAngle) + 360) % 360;
-    const cx = 0.5, cy = 0.5;
-    const dx = ball.nx - cx;
-    const dy = ball.ny - cy;
 
-    let newNx, newNy, newNvx, newNvy;
-
+    let nx, ny, nvx, nvy;
     if (delta === 90) {
-      newNx  = 1 - ball.ny;
-      newNy  = ball.nx;
-      newNvx = ball.nvy;
-      newNvy = -ball.nvx;
+      nx = 1 - ball.ny; ny = ball.nx;
+      nvx = ball.nvy;   nvy = -ball.nvx;
     } else if (delta === 270) {
-      newNx  = ball.ny;
-      newNy  = 1 - ball.nx;
-      newNvx = -ball.nvy;
-      newNvy = ball.nvx;
+      nx = ball.ny;     ny = 1 - ball.nx;
+      nvx = -ball.nvy;  nvy = ball.nvx;
     } else if (delta === 180) {
-      newNx  = 1 - ball.nx;
-      newNy  = 1 - ball.ny;
-      newNvx = -ball.nvx;
-      newNvy = -ball.nvy;
+      nx = 1 - ball.nx; ny = 1 - ball.ny;
+      nvx = -ball.nvx;  nvy = -ball.nvy;
     } else {
-      newNx  = ball.nx;
-      newNy  = ball.ny;
-      newNvx = ball.nvx;
-      newNvy = ball.nvy;
+      nx = ball.nx; ny = ball.ny; nvx = ball.nvx; nvy = ball.nvy;
     }
 
-    ball.nx  = Math.min(Math.max(newNx, 0), 1);
-    ball.ny  = Math.min(Math.max(newNy, 0), 1);
-    ball.nvx = newNvx;
-    ball.nvy = newNvy;
-
+    ball.nx  = Math.min(Math.max(nx,  0), 1);
+    ball.ny  = Math.min(Math.max(ny,  0), 1);
+    ball.nvx = nvx; ball.nvy = nvy;
     lastOrientAngle = newAngle;
   }
 
-  W = canvas.width = newW;
-  H = canvas.height = newH;
+  W = physCanvas.width  = newW;
+  H = physCanvas.height = newH;
   refreshObstacles();
 }
 
+// ═══════════════════════════════════════════════════════
+//  OBSTACLES
+// ═══════════════════════════════════════════════════════
 function registerObstacles(selectors = ['.obstacle']) {
   obstacles = [];
   const wr = world.getBoundingClientRect();
@@ -330,28 +624,26 @@ function registerObstacles(selectors = ['.obstacle']) {
       if (el.id === 'permBtn' && el.dataset.disabled === '1') return;
       const rect = el.getBoundingClientRect();
       obstacles.push({
-        el,
         nx: (rect.left - wr.left) / wr.width,
-        ny: (rect.top - wr.top) / wr.height,
-        nw: rect.width / wr.width,
+        ny: (rect.top  - wr.top)  / wr.height,
+        nw: rect.width  / wr.width,
         nh: rect.height / wr.height,
       });
     });
   });
 }
 
-function refreshObstacles() {
-  registerObstacles();
-}
+function refreshObstacles() { registerObstacles(); }
 
-const FIXED_DT = 1 / 120;
-const MAX_ACCUM = FIXED_DT * 8;
-let accumulator = 0;
-let lastTime = null;
+// ═══════════════════════════════════════════════════════
+//  PHYSICS
+// ═══════════════════════════════════════════════════════
+const FIXED_DT   = 1 / 120;
+const MAX_ACCUM  = FIXED_DT * 8;
+let accumulator  = 0;
+let lastTime     = null;
 
-function normRadius() {
-  return H > 0 ? CFG.radius / H : 0;
-}
+function normRadius() { return H > 0 ? CFG.radius / H : 0; }
 
 function physicsStep(dt) {
   const nr = normRadius();
@@ -359,28 +651,26 @@ function physicsStep(dt) {
 
   ball.nvx += gVec.x * gn * dt;
   ball.nvy += gVec.y * gn * dt;
-
   ball.nvx *= CFG.friction;
   ball.nvy *= CFG.friction;
-
-  ball.nx += ball.nvx * dt;
-  ball.ny += ball.nvy * dt;
+  ball.nx  += ball.nvx * dt;
+  ball.ny  += ball.nvy * dt;
 
   const nrX = nr * (H / W);
 
   if (ball.nx - nrX < 0) {
-    ball.nx = nrX;
+    ball.nx  = nrX;
     ball.nvx = Math.abs(ball.nvx) * CFG.restitution;
   } else if (ball.nx + nrX > 1) {
-    ball.nx = 1 - nrX;
+    ball.nx  = 1 - nrX;
     ball.nvx = -Math.abs(ball.nvx) * CFG.restitution;
   }
 
   if (ball.ny - nr < 0) {
-    ball.ny = nr;
+    ball.ny  = nr;
     ball.nvy = Math.abs(ball.nvy) * CFG.restitution;
   } else if (ball.ny + nr > 1) {
-    ball.ny = 1 - nr;
+    ball.ny  = 1 - nr;
     ball.nvy = -Math.abs(ball.nvy) * CFG.restitution;
   }
 
@@ -388,47 +678,38 @@ function physicsStep(dt) {
 }
 
 function resolveAABB(ob) {
-  const bx = ball.nx * W;
-  const by = ball.ny * H;
-  const r = CFG.radius;
+  const bx = ball.nx * W, by = ball.ny * H;
+  const r  = CFG.radius;
+  const ox = ob.nx * W,   oy = ob.ny * H;
+  const ow = ob.nw * W,   oh = ob.nh * H;
 
-  const ox = ob.nx * W;
-  const oy = ob.ny * H;
-  const ow = ob.nw * W;
-  const oh = ob.nh * H;
-
-  const clampX = Math.max(ox, Math.min(bx, ox + ow));
-  const clampY = Math.max(oy, Math.min(by, oy + oh));
-  const dx = bx - clampX;
-  const dy = by - clampY;
+  const cx   = Math.max(ox, Math.min(bx, ox + ow));
+  const cy_  = Math.max(oy, Math.min(by, oy + oh));
+  const dx   = bx - cx, dy = by - cy_;
   const dist2 = dx * dx + dy * dy;
   if (dist2 >= r * r) return;
 
   const dist = Math.sqrt(dist2) || 0.001;
-  const nx_ = dx / dist;
-  const ny_ = dy / dist;
-  const pen = r - dist;
+  const nx_  = dx / dist, ny_ = dy / dist;
+  const pen  = r - dist;
 
   ball.nx += (nx_ * pen) / W;
   ball.ny += (ny_ * pen) / H;
 
-  const pvx = ball.nvx * W;
-  const pvy = ball.nvy * H;
+  const pvx = ball.nvx * W, pvy = ball.nvy * H;
   const dot = pvx * nx_ + pvy * ny_;
   if (dot < 0) {
-    const newPvx = pvx - (1 + CFG.restitution) * dot * nx_;
-    const newPvy = pvy - (1 + CFG.restitution) * dot * ny_;
-    ball.nvx = newPvx / W;
-    ball.nvy = newPvy / H;
+    ball.nvx = (pvx - (1 + CFG.restitution) * dot * nx_) / W;
+    ball.nvy = (pvy - (1 + CFG.restitution) * dot * ny_) / H;
   }
 }
 
+// ═══════════════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════════════
 function render() {
   ctx.clearRect(0, 0, W, H);
-
-  const px = ball.nx * W;
-  const py = ball.ny * H;
-  const r = CFG.radius;
+  const px = ball.nx * W, py = ball.ny * H, r = CFG.radius;
 
   ctx.beginPath();
   ctx.arc(px, py, r, 0, Math.PI * 2);
@@ -445,12 +726,18 @@ function render() {
   ctx.arc(px, py, r, 0, Math.PI * 2);
   ctx.fillStyle = grad;
   ctx.fill();
+
+  // Update debug panel every frame (cheap)
+  updateDebug();
 }
 
+// ═══════════════════════════════════════════════════════
+//  MAIN LOOP
+// ═══════════════════════════════════════════════════════
 function loop(ts) {
   requestAnimationFrame(loop);
   if (lastTime === null) lastTime = ts;
-  let raw = Math.min((ts - lastTime) / 1000, MAX_ACCUM);
+  const raw = Math.min((ts - lastTime) / 1000, MAX_ACCUM);
   lastTime = ts;
   accumulator += raw;
   while (accumulator >= FIXED_DT) {
@@ -460,33 +747,29 @@ function loop(ts) {
   render();
 }
 
+// ═══════════════════════════════════════════════════════
+//  DEVICE ORIENTATION
+// ═══════════════════════════════════════════════════════
 function onOrientation(e) {
-  const beta = e.beta ?? 0;
-  const gamma = e.gamma ?? 0;
+  rawBeta  = e.beta  ?? 0;
+  rawGamma = e.gamma ?? 0;
+
   const angle = getOrientAngle();
+  const cal   = applyCalibration(rawBeta, rawGamma);
 
-  const raw = applyCalibration(beta, gamma);
-
+  // Rotate the calibrated vector according to screen orientation.
+  // (When screen rotates 90° CW, the physical axes swap relative to the display.)
   switch (angle) {
     case 0:
-      gVec.x = raw.x;
-      gVec.y = raw.y;
-      break;
+      gVec.x =  cal.x; gVec.y =  cal.y; break;
     case 90:
-      gVec.x = raw.y;
-      gVec.y = raw.x;
-      break;
+      gVec.x =  cal.y; gVec.y =  cal.x; break;
     case 270:
-      gVec.x = -raw.y;
-      gVec.y = -raw.x;
-      break;
+      gVec.x = -cal.y; gVec.y = -cal.x; break;
     case 180:
-      gVec.x = -raw.x;
-      gVec.y = raw.y;
-      break;
+      gVec.x = -cal.x; gVec.y = -cal.y; break;
     default:
-      gVec.x = raw.x;
-      gVec.y = raw.y;
+      gVec.x =  cal.x; gVec.y =  cal.y;
   }
 
   gVec.x = Math.max(-1, Math.min(1, gVec.x));
@@ -494,71 +777,70 @@ function onOrientation(e) {
 }
 
 function startOrientation() {
+  sensorsActive = true;
   window.addEventListener('deviceorientation', onOrientation);
 }
 
+// ═══════════════════════════════════════════════════════
+//  SENSOR PERMISSION
+// ═══════════════════════════════════════════════════════
 function setupOrientation() {
   const btn = document.getElementById('permBtn');
 
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    btn.style.display = 'inline-block';
-
-    btn.addEventListener('click', () => {
-      DeviceOrientationEvent.requestPermission()
-        .then(state => {
-          if (state === 'granted') {
-            startOrientation();
-            btn.dataset.disabled = '1';
-            btn.style.pointerEvents = 'none';
-            btn.style.opacity = '0.4';
-            btn.textContent = '✔ Sensori abilitati';
-            refreshObstacles();
-          }
-        })
-        .catch(() => {});
-    });
-  } else if (window.DeviceOrientationEvent) {
+  const markEnabled = () => {
     btn.dataset.disabled = '1';
     btn.style.pointerEvents = 'none';
     btn.style.opacity = '0.4';
     btn.textContent = '✔ Sensori abilitati';
     startOrientation();
     refreshObstacles();
+  };
+
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iOS 13+: requires explicit user gesture
+    btn.style.display = 'inline-block';
+    btn.addEventListener('click', () => {
+      DeviceOrientationEvent.requestPermission()
+        .then(state => { if (state === 'granted') markEnabled(); })
+        .catch(() => {});
+    });
+  } else if (window.DeviceOrientationEvent) {
+    // Android / desktop: auto-enable
+    markEnabled();
   }
 }
 
+// ═══════════════════════════════════════════════════════
+//  SLIDER BINDINGS
+// ═══════════════════════════════════════════════════════
 function bindSlider(id, valId, key) {
-  const sl = document.getElementById(id);
+  const sl  = document.getElementById(id);
   const lbl = document.getElementById(valId);
-  sl.addEventListener('input', () => {
-    CFG[key] = +sl.value;
-    lbl.textContent = sl.value;
-  });
+  sl.addEventListener('input', () => { CFG[key] = +sl.value; lbl.textContent = sl.value; });
 }
 
-bindSlider('slGravity', 'valGravity', 'gravity');
+bindSlider('slGravity',     'valGravity',     'gravity');
 bindSlider('slRestitution', 'valRestitution', 'restitution');
-bindSlider('slFriction', 'valFriction', 'friction');
-bindSlider('slRadius', 'valRadius', 'radius');
+bindSlider('slFriction',    'valFriction',    'friction');
+bindSlider('slRadius',      'valRadius',      'radius');
 
 document.getElementById('resetBtn').addEventListener('click', () => {
-  ball.nx = 0.5;
-  ball.ny = 0.25;
-  ball.nvx = 0;
-  ball.nvy = 0;
+  ball.nx = 0.5; ball.ny = 0.25; ball.nvx = 0; ball.nvy = 0;
 });
 
-document.getElementById('calibReset').addEventListener('click', () => {
-  resetCalibration();
-});
+document.getElementById('calibReset').addEventListener('click', resetCalibration);
+document.getElementById('calibStart').addEventListener('click', startCalibration);
 
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
 if (screen.orientation) screen.orientation.addEventListener('change', onResize);
 window.addEventListener('orientationchange', onResize);
 new ResizeObserver(onResize).observe(world);
 
 onResize();
-renderCalibration();
+renderCalibText();
 setupOrientation();
 refreshObstacles();
 requestAnimationFrame(loop);
