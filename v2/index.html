@@ -239,7 +239,16 @@ function getOrientAngle() {
   let a = 0;
   if (screen.orientation?.angle !== undefined) a = screen.orientation.angle;
   else if (typeof window.orientation === 'number') a = Math.abs(window.orientation);
-  if (naturalIsLandscape) a = (a + 90) % 360;
+  if (naturalIsLandscape) {
+    // iPad natural = landscape. screen.orientation.angle misura la rotazione CW
+    // dal landscape naturale. Per normalizzare a un sistema portrait-centrico
+    // dobbiamo INVERTIRE la direzione della rotazione, non aggiungerle 90°.
+    //   raw=0°  (landscape)  → 90°   ✓
+    //   raw=90° (portrait)   → 0°    ✓  (era 180° con +90°, causava inversione X/Y)
+    //   raw=180° (land. flip)→ 270°
+    //   raw=270° (port. flip)→ 180°
+    return (90 - a + 360) % 360;
+  }
   return a;
 }
 
