@@ -121,7 +121,7 @@
       padding: 10px 12px;
       color: #fff;
       font-size: .76rem;
-      width: 216px;
+      width: 248px;
       user-select: none;
     }
 
@@ -242,11 +242,15 @@
   <div class="arrows-row">
     <div class="arrow-cell">
       <div class="arrow-label">📡 Grezzo<br>(W3C)</div>
-      <canvas class="arrow-canvas" id="arrowRaw" width="72" height="72"></canvas>
+      <canvas class="arrow-canvas" id="arrowRaw" width="58" height="58"></canvas>
     </div>
     <div class="arrow-cell">
       <div class="arrow-label">⚽ Calibrato<br>(gVec)</div>
-      <canvas class="arrow-canvas" id="arrowCal" width="72" height="72"></canvas>
+      <canvas class="arrow-canvas" id="arrowCal" width="58" height="58"></canvas>
+    </div>
+    <div class="arrow-cell">
+      <div class="arrow-label">🧭 Solo γ<br>(fisico L/R)</div>
+      <canvas class="arrow-canvas" id="arrowGamma" width="58" height="58"></canvas>
     </div>
   </div>
 
@@ -312,8 +316,9 @@ let calibBusy = false;
 const physCanvas  = document.getElementById('physicsCanvas');
 const ctx         = physCanvas.getContext('2d');
 const world       = document.getElementById('world');
-const arrowRawCtx = document.getElementById('arrowRaw').getContext('2d');
-const arrowCalCtx = document.getElementById('arrowCal').getContext('2d');
+const arrowRawCtx   = document.getElementById('arrowRaw').getContext('2d');
+const arrowCalCtx   = document.getElementById('arrowCal').getContext('2d');
+const arrowGammaCtx = document.getElementById('arrowGamma').getContext('2d');
 
 // ═══════════════════════════════════════════════════════
 //  CALIBRATION – persistence
@@ -493,13 +498,18 @@ function updateDebug() {
   document.getElementById('calibSensorVals').textContent =
     `β ${rawBeta.toFixed(1)}°  γ ${rawGamma.toFixed(1)}°`;
 
-  // "Grezzo" arrow: natural W3C mapping before calibration.
-  // gamma → horizontal (x), beta → vertical (y).
-  // This is the direction the ball *should* go on a standard device.
-  drawArrow(arrowRawCtx, 72, rawGamma / 90, rawBeta / 90, '#4a9eff');
+  // "Grezzo": natural W3C mapping, no calibration — gamma→x, beta→y
+  drawArrow(arrowRawCtx, 58, rawGamma / 90, rawBeta / 90, '#4a9eff');
 
-  // "Calibrato" arrow: actual gVec driving the physics.
-  drawArrow(arrowCalCtx, 72, gVec.x, gVec.y, '#e03030');
+  // "Calibrato": actual gVec driving the physics
+  drawArrow(arrowCalCtx, 58, gVec.x, gVec.y, '#e03030');
+
+  // "Solo γ": gamma maps ONLY to the horizontal axis, y fixed to 0.
+  // According to W3C, gamma is always the physical left/right tilt of the
+  // device regardless of screen orientation.  This arrow should consistently
+  // point left/right when you tilt the phone sideways, even if the screen
+  // has rotated to landscape.  Compare it with the others to verify.
+  drawArrow(arrowGammaCtx, 58, rawGamma / 90, 0, '#a0e040');
 }
 
 /**
