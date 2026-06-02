@@ -172,6 +172,7 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
+  <div id="version">v1</div>
 </div>
 
 <!-- ── Physics controls ───────────────────── -->
@@ -407,10 +408,11 @@ let accumulator = 0, lastTime = null;
 
 function physicsStep(dt) {
   const nr = H > 0 ? CFG.radius / H : 0;
-  const gn = CFG.gravity / H;
+  const gnX = W > 0 ? CFG.gravity / W : 0;
+  const gnY = H > 0 ? CFG.gravity / H : 0;
 
-  ball.nvx += gVec.x * gn * dt;
-  ball.nvy += gVec.y * gn * dt;
+  ball.nvx += gVec.x * gnX * dt;
+  ball.nvy += gVec.y * gnY * dt;
   ball.nvx *= CFG.friction;
   ball.nvy *= CFG.friction;
   ball.nx  += ball.nvx * dt;
