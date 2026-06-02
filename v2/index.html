@@ -24,14 +24,14 @@
       position: absolute;
       inset: 0;
       display: block;
-      z-index: 1;
+      z-index: 2;
     }
 
     .obstacle {
       position: absolute;
       background: #3a6ea5;
       border-radius: 6px;
-      z-index: 2;
+      z-index: 3;
       pointer-events: auto;
     }
 
@@ -49,8 +49,29 @@
       border-radius: 50px;
       cursor: pointer;
       box-shadow: 0 4px 12px rgba(224,48,48,0.35);
-      z-index: 3;
+      z-index: 10;
     }
+
+    #colorOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      overflow: hidden;
+      pointer-events: auto;
+    }
+
+    #overlayGreen, #overlayRed {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      
+    }
+    #overlayGreen, #overlayRed * {
+      z-index: 10;
+    }
+
+    #overlayGreen { background: #00aa00; }
+    #overlayRed   { background: #cc0000; }
     #permBtn:hover  { background: #c02020; }
     #permBtn:active { transform: translateX(-50%) translateY(1px); }
 
@@ -142,6 +163,10 @@
 
 <div id="world">
   <canvas id="physicsCanvas"></canvas>
+  <div id="colorOverlay">
+    <div id="overlayGreen"><button style="margin:auto" onclick="alert('verde')">Verde</button></div>
+    <div id="overlayRed"><button style="margin:auto" onclick="alert('rosso')">Rosso</button></div>
+  </div>
   <button id="permBtn" class="obstacle">🔄 Abilita sensori</button>
 </div>
 
@@ -172,7 +197,7 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
-  <div id="version">v4</div>
+  <div id="version">v5</div>
 </div>
 
 <!-- ── Physics controls ───────────────────── -->
@@ -301,6 +326,7 @@ let rawBeta = 0, rawGamma = 0;
 const physCanvas    = document.getElementById('physicsCanvas');
 const ctx           = physCanvas.getContext('2d');
 const world         = document.getElementById('world');
+const overlayRedEl  = document.getElementById('overlayRed');
 const arrowRawCtx   = document.getElementById('arrowRaw').getContext('2d');
 const arrowCalCtx   = document.getElementById('arrowCal').getContext('2d');
 const arrowGammaCtx = document.getElementById('arrowGamma').getContext('2d');
@@ -510,6 +536,23 @@ function drawArrow(actx, size, x, y, color) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  OVERLAY
+// ═══════════════════════════════════════════════════════
+function updateOverlay() {
+  const tiltDeg = Math.atan2(Math.abs(gVec.x), Math.abs(gVec.y)) * 180 / Math.PI;
+  const LOW = 5, HIGH = 85;
+  const t = Math.max(0, Math.min(1, (tiltDeg - LOW) / (HIGH - LOW)));
+
+  const cssAngle = Math.atan2(gVec.x, -gVec.y) * 180 / Math.PI;
+  const tp = (1 - t) * 100;
+  const FEATHER = 20;
+
+  const mask = `linear-gradient(${cssAngle}deg, black calc(${tp}% - ${FEATHER}px), transparent calc(${tp}% + ${FEATHER}px))`;
+  overlayRedEl.style.webkitMaskImage = mask;
+  overlayRedEl.style.maskImage = mask;
+}
+
+// ═══════════════════════════════════════════════════════
 //  RENDER
 // ═══════════════════════════════════════════════════════
 function render() {
@@ -525,6 +568,7 @@ function render() {
   ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
   ctx.fillStyle = grad; ctx.fill();
 
+  updateOverlay();
   updateDebug();
 }
 
