@@ -172,7 +172,7 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
-  <div id="version">v1</div>
+  <div id="version">v2</div>
 </div>
 
 <!-- ── Physics controls ───────────────────── -->
@@ -364,9 +364,9 @@ function onResize() {
     const delta = ((newAngle - lastOrientAngle) + 360) % 360;
     let nx, ny, nvx, nvy;
     if (delta === 90) {
-      nx = 1 - ball.ny; ny = ball.nx;     nvx =  ball.nvy; nvy = -ball.nvx;
+      nx = ball.ny;     ny = 1 - ball.nx; nvx =  ball.nvy; nvy = -ball.nvx;
     } else if (delta === 270) {
-      nx = ball.ny;     ny = 1 - ball.nx; nvx = -ball.nvy; nvy =  ball.nvx;
+      nx = 1 - ball.ny; ny = ball.nx;     nvx = -ball.nvy; nvy =  ball.nvx;
     } else {
       nx = 1 - ball.nx; ny = 1 - ball.ny; nvx = -ball.nvx; nvy = -ball.nvy;
     }
