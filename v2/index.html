@@ -24,7 +24,7 @@
       position: absolute;
       inset: 0;
       display: block;
-      z-index: 2;
+      z-index: 5;
     }
 
     .obstacle {
@@ -55,19 +55,14 @@
     #colorOverlay {
       position: absolute;
       inset: 0;
-      z-index: 1;
+      z-index: 2;
       overflow: hidden;
       pointer-events: auto;
     }
 
     #overlayGreen, #overlayRed {
       position: absolute;
-      inset: 0;
-      display: flex;
-      
-    }
-    #overlayGreen, #overlayRed * {
-      z-index: 10;
+      inset: 0; display: flex;
     }
 
     #overlayGreen { background: #00aa00; }
@@ -165,7 +160,7 @@
   <canvas id="physicsCanvas"></canvas>
   <div id="colorOverlay">
     <div id="overlayGreen"><button style="margin:auto" onclick="alert('verde')">Verde</button></div>
-    <div id="overlayRed"><button style="margin:auto" onclick="alert('rosso')">Rosso</button></div>
+    <div id="overlayRed"><button style="margin:auto" onclick="alert('rosso')">Verde</button></div>
   </div>
   <button id="permBtn" class="obstacle">🔄 Abilita sensori</button>
 </div>
@@ -197,7 +192,7 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
-  <div id="version">v5</div>
+  <div id="version">5</div>
 </div>
 
 <!-- ── Physics controls ───────────────────── -->
