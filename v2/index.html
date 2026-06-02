@@ -172,7 +172,7 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
-  <div id="version">v3</div>
+  <div id="version">v4</div>
 </div>
 
 <!-- ── Physics controls ───────────────────── -->
@@ -337,7 +337,7 @@ function onOrientation(e) {
   const b = rawBeta  / 90;
 
   let sx, sy;
-  switch (getOrientAngle()) {
+  switch (lastOrientAngle) {
     case 90:  sx =  b; sy = -g; break;
     case 180: sx = -g; sy = -b; break;
     case 270: sx = -b; sy =  g; break;
