@@ -172,7 +172,7 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
-  <div id="version">v2</div>
+  <div id="version">v3</div>
 </div>
 
 <!-- ── Physics controls ───────────────────── -->
@@ -239,7 +239,7 @@ function detectNaturalOrientation() {
 function getOrientAngle() {
   let a = 0;
   if (screen.orientation?.angle !== undefined) a = screen.orientation.angle;
-  else if (typeof window.orientation === 'number') a = Math.abs(window.orientation);
+  else if (typeof window.orientation === 'number') a = ((window.orientation % 360) + 360) % 360;
   if (naturalIsLandscape) {
     // iPad natural = landscape. screen.orientation.angle misura la rotazione CW
     // dal landscape naturale. Per normalizzare a un sistema portrait-centrico
