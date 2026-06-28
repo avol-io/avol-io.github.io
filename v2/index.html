@@ -45,7 +45,7 @@
     .slides-h {                         /* creative → horizontal scroll     */
       display: flex;
       overflow-x: auto; overflow-y: hidden;
-      scroll-snap-type: x proximity;    /* gentle snap — lets wheel scroll feel gradual */
+      scroll-snap-type: none;           /* no snap → wheel maps 1:1 px, no sticky re-snap */
     }
 
     .slide {
@@ -298,6 +298,8 @@ const ROT_SIGN = 1;           // flip to -1 if content rotates the wrong way on 
 const MAX_FRAME_V = 2.5;      // cap on the wall "hit" velocity (normalised/sec)
 const MAX_JUMP    = 220;      // px: clamp implausible per-frame window jumps (anti-flicker)
 
+const G_NORM = 9.81;          // m/s² — normaliser for accelerationIncludingGravity
+
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ═══════════════════════════════════════════════════════
@@ -356,7 +358,9 @@ let W = 0, H = 0;
 let lastOrientAngle = getOrientAngle();
 let rawBeta = 0, rawGamma = 0;
 
-let sensorsActive = false;                   // true once real orientation events arrive
+let sensorsActive = false;                   // true once real sensor events arrive
+let motionActive  = false;                   // devicemotion gravity available (preferred source)
+const accFilt = { lr: 0, down: 1 };          // low-passed device gravity (left/right, down-screen)
 let manualMode = 'auto';                     // 'auto' | 'pro' | 'creative'
 let blend = 0, blendTarget = 0;              // 0 = professional, 1 = creative
 let rotAngle = 0;                            // current content rotation (deg)
@@ -386,36 +390,51 @@ if (DEBUG) document.body.classList.add('debug');
 // ═══════════════════════════════════════════════════════
 let orientationDetected = false;
 
+// Map device-frame gravity (left/right, down-the-screen with +1 at upright) to
+// screen axes for the current orientation, then apply manual sign calibration.
+function setScreenGravity(devLR, devDown) {
+  let sx, sy;
+  switch (lastOrientAngle) {
+    case 90:  sx =  devDown; sy = -devLR;  break;
+    case 180: sx = -devLR;   sy = -devDown; break;
+    case 270: sx = -devDown; sy =  devLR;  break;
+    default:  sx =  devLR;   sy =  devDown;        // 0° — portrait
+  }
+  gVec.x = clamp(sx * SIGNS.xSign, -1, 1);
+  gVec.y = clamp(sy * SIGNS.ySign, -1, 1);
+}
+
 function onOrientation(e) {
   // Ignore phantom events (desktop browsers fire null-valued ones).
   if (e.beta == null && e.gamma == null) return;
 
-  if (!sensorsActive) {
-    sensorsActive = true;
-    gVec.x = 0; gVec.y = 1;
-  }
+  if (!sensorsActive) sensorsActive = true;
   if (!orientationDetected) {
     detectNaturalOrientation();
     orientationDetected = true;
     lastOrientAngle = getOrientAngle();
   }
-
   rawBeta  = e.beta  ?? 0;
   rawGamma = e.gamma ?? 0;
 
-  const g = rawGamma / 90;
-  const b = rawBeta  / 90;
+  if (motionActive) return;                          // devicemotion drives gVec when available
+  setScreenGravity(rawGamma / 90, rawBeta / 90);
+}
 
-  let sx, sy;
-  switch (lastOrientAngle) {
-    case 90:  sx =  b; sy = -g; break;
-    case 180: sx = -g; sy = -b; break;
-    case 270: sx = -b; sy =  g; break;
-    default:  sx =  g; sy =  b;   // 0° — portrait
-  }
+// Preferred gravity source: accelerationIncludingGravity has no gimbal lock, so
+// it stays continuous through poses iOS can't report (e.g. upside-down portrait),
+// fixing the ball/text flipping there. Signs are correctable via Inverti X/Y.
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || (a.x == null && a.y == null)) return;
+  motionActive = true;
+  if (!sensorsActive) sensorsActive = true;
 
-  gVec.x = clamp(sx * SIGNS.xSign, -1, 1);
-  gVec.y = clamp(sy * SIGNS.ySign, -1, 1);
+  const lr   =  clamp((a.x ?? 0) / G_NORM, -1, 1);   // device left/right
+  const down = -clamp((a.y ?? 0) / G_NORM, -1, 1);   // device down-the-screen (+1 at upright)
+  accFilt.lr   += (lr   - accFilt.lr)   * 0.25;       // light low-pass vs shake noise
+  accFilt.down += (down - accFilt.down) * 0.25;
+  setScreenGravity(accFilt.lr, accFilt.down);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -641,7 +660,8 @@ function updateDebug() {
     ? (naturalIsLandscape ? ' (iPad/landscape)' : ' (iPhone/portrait)')
     : ' (desktop)';
   document.getElementById('calibOrient').textContent = (ORIENT_NAMES[angle] ?? angle + '°') + tag;
-  document.getElementById('calibSensorVals').textContent = `β ${rawBeta.toFixed(1)}°  γ ${rawGamma.toFixed(1)}°`;
+  document.getElementById('calibSensorVals').textContent =
+    `β ${rawBeta.toFixed(1)}° γ ${rawGamma.toFixed(1)}° · ${motionActive ? `a(${accFilt.lr.toFixed(2)},${accFilt.down.toFixed(2)})` : 'no motion'}`;
   document.getElementById('blendReadout').textContent =
     `blend ${blend.toFixed(2)} · mode ${manualMode}${sensorsActive ? '' : ' · win'}`;
 
@@ -726,27 +746,38 @@ function loop(ts) {
 // ═══════════════════════════════════════════════════════
 function setupOrientation() {
   const btn = document.getElementById('permBtn');
-  if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
-    // iOS — needs an explicit user gesture.
+  const start = () => {
+    window.addEventListener('deviceorientation', onOrientation);
+    window.addEventListener('devicemotion', onMotion);
+  };
+  const needsPrompt =
+    typeof DeviceOrientationEvent?.requestPermission === 'function' ||
+    typeof DeviceMotionEvent?.requestPermission === 'function';
+
+  if (needsPrompt) {
+    // iOS — one tap requests both orientation and motion permissions.
     btn.style.display = 'inline-block';
     btn.addEventListener('click', () => {
-      DeviceOrientationEvent.requestPermission()
-        .then(s => {
-          if (s === 'granted') {
-            window.addEventListener('deviceorientation', onOrientation);
-            // Fade the button out, then drop it as an obstacle so the ball falls.
-            btn.dataset.disabled = '1';
-            btn.style.opacity = '0';
-            refreshObstacles();
-            setTimeout(() => { btn.style.display = 'none'; }, 300);
-          }
-        })
-        .catch(() => {});
+      const reqs = [];
+      if (typeof DeviceOrientationEvent?.requestPermission === 'function')
+        reqs.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
+      if (typeof DeviceMotionEvent?.requestPermission === 'function')
+        reqs.push(DeviceMotionEvent.requestPermission().catch(() => 'denied'));
+      Promise.all(reqs).then(rs => {
+        if (rs.some(s => s === 'granted')) {
+          start();
+          // Fade the button out, then drop it as an obstacle so the ball falls.
+          btn.dataset.disabled = '1';
+          btn.style.opacity = '0';
+          refreshObstacles();
+          setTimeout(() => { btn.style.display = 'none'; }, 300);
+        }
+      });
     });
-  } else if (window.DeviceOrientationEvent) {
-    // Android / desktop — listen directly; desktop simply never fires real events
-    // (or fires null-valued ones, ignored in onOrientation) → stays desktop mode.
-    window.addEventListener('deviceorientation', onOrientation);
+  } else if (window.DeviceOrientationEvent || window.DeviceMotionEvent) {
+    // Android / desktop — listen directly; desktop never fires real events
+    // (or fires null-valued ones, ignored) → stays desktop mode.
+    start();
   }
 }
 
