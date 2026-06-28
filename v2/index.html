@@ -15,10 +15,13 @@
       font-family: system-ui, sans-serif;
     }
 
+    /* ── Rotor wraps both sides; rotates to keep content upright ─ */
+    #rotor { position: fixed; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+
     /* ── Two home "souls" — stacked full-screen layers ───────── */
-    .side { position: fixed; inset: 0; }
-    #sideProfessional { z-index: 1; background: #0e141d; }   /* base layer  */
-    #sideCreative     { z-index: 2; background: #1d0f1a; }   /* revealed via mask */
+    .side { position: absolute; inset: 0; }
+    #sideProfessional { z-index: 1; background: #0e141d; }   /* deep blue — professional */
+    #sideCreative     { z-index: 2; background: #c2185b; }   /* vivid magenta — creative  */
 
     /* ── Slide scaffolding (full-page, scroll-snap) ──────────── */
     .slides {
@@ -94,6 +97,7 @@
       padding: 14px 36px;
       border: none; border-radius: 50px; cursor: pointer;
       box-shadow: 0 4px 12px rgba(224,48,48,.35);
+      transition: opacity .3s ease;
     }
     #permBtn:hover  { background: #c02020; }
     #permBtn:active { transform: translateX(-50%) translateY(1px); }
@@ -161,6 +165,9 @@
 </head>
 <body>
 
+<!-- ── Rotor: both sides rotate together to keep content upright ── -->
+<div id="rotor">
+
 <!-- ── Professional side (base layer, vertical slides) ───────── -->
 <div id="sideProfessional" class="side">
   <div class="slides slides-v">
@@ -191,6 +198,8 @@
   </div>
 </div>
 
+</div><!-- /#rotor -->
+
 <!-- ── Ball overlay ─────────────────────────────────────────── -->
 <canvas id="physicsCanvas"></canvas>
 
@@ -201,8 +210,8 @@
   <button data-mode="creative">Creativo</button>
 </div>
 
-<!-- ── Sensor permission (mobile) ───────────────────────────── -->
-<button id="permBtn">🔄 Abilita sensori</button>
+<!-- ── Sensor permission (mobile) — also a ball obstacle until granted ── -->
+<button id="permBtn" class="obstacle">🔄 Abilita sensori</button>
 
 <!-- ── Debug panel (hidden unless ?debug) ───────────────────── -->
 <div id="calib">
@@ -272,6 +281,15 @@ const TILT_LOW = 30, TILT_HIGH = 60;
 const FEATHER  = 24;          // px feather on the crossfade seam
 const BLEND_EASE = 0.15;      // per-frame lerp toward target
 
+// Content rotation (mobile) — keep text upright vs gravity, with a deadzone
+// near each rest position so small tilts don't twitch the layout.
+const ROT_DEAD = 12;          // deg ignored before re-aligning upright
+const ROT_EASE = 0.18;        // per-frame lerp for content rotation
+
+// Desktop window-as-frame tuning
+const MAX_FRAME_V = 2.5;      // cap on the wall "hit" velocity (normalised/sec)
+const MAX_JUMP    = 220;      // px: clamp implausible per-frame window jumps (anti-flicker)
+
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ═══════════════════════════════════════════════════════
@@ -325,6 +343,7 @@ let SIGNS = loadSigns();
 // ═══════════════════════════════════════════════════════
 const gVec = { x: 0, y: 1 };                 // gravity direction (desktop default = down)
 const ball = { nx: 0.5, ny: 0.25, nvx: 0, nvy: 0 };
+let obstacles = [];
 let W = 0, H = 0;
 let lastOrientAngle = getOrientAngle();
 let rawBeta = 0, rawGamma = 0;
@@ -332,6 +351,7 @@ let rawBeta = 0, rawGamma = 0;
 let sensorsActive = false;                   // true once real orientation events arrive
 let manualMode = 'auto';                     // 'auto' | 'pro' | 'creative'
 let blend = 0, blendTarget = 0;              // 0 = professional, 1 = creative
+let rotAngle = 0;                            // current content rotation (deg)
 
 // desktop window-frame tracking
 let lastScreenX = window.screenX, lastScreenY = window.screenY;
@@ -341,6 +361,7 @@ let lastScreenX = window.screenX, lastScreenY = window.screenY;
 // ═══════════════════════════════════════════════════════
 const physCanvas    = document.getElementById('physicsCanvas');
 const ctx           = physCanvas.getContext('2d');
+const rotor         = document.getElementById('rotor');
 const sideProf      = document.getElementById('sideProfessional');
 const sideCreative  = document.getElementById('sideCreative');
 const arrowRawCtx   = document.getElementById('arrowRaw').getContext('2d');
@@ -414,6 +435,7 @@ function onResize() {
 
   W = physCanvas.width  = window.innerWidth;
   H = physCanvas.height = window.innerHeight;
+  refreshObstacles();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -440,6 +462,46 @@ function physicsStep(dt) {
   if (ball.nx + nrX > 1) { ball.nx = 1 - nrX; ball.nvx = -Math.abs(ball.nvx) * CFG.restitution; }
   if (ball.ny - nr  < 0) { ball.ny =      nr; ball.nvy =  Math.abs(ball.nvy) * CFG.restitution; }
   if (ball.ny + nr  > 1) { ball.ny = 1 -  nr; ball.nvy = -Math.abs(ball.nvy) * CFG.restitution; }
+
+  for (const ob of obstacles) resolveAABB(ob);
+}
+
+// ═══════════════════════════════════════════════════════
+//  OBSTACLES — DOM `.obstacle` elements measured in screen space.
+//  Used so the ball rests on the "Abilita sensori" button until granted.
+// ═══════════════════════════════════════════════════════
+function refreshObstacles() {
+  obstacles = [];
+  document.querySelectorAll('.obstacle').forEach(el => {
+    if (el.dataset.disabled === '1') return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return;     // hidden → not an obstacle
+    obstacles.push({ nx: r.left / W, ny: r.top / H, nw: r.width / W, nh: r.height / H });
+  });
+}
+
+function resolveAABB(ob) {
+  const bx = ball.nx * W, by = ball.ny * H, r = CFG.radius;
+  const ox = ob.nx * W,   oy = ob.ny * H;
+  const ow = ob.nw * W,   oh = ob.nh * H;
+
+  const cx = Math.max(ox, Math.min(bx, ox + ow));
+  const cy = Math.max(oy, Math.min(by, oy + oh));
+  const dx = bx - cx, dy = by - cy;
+  const d2 = dx * dx + dy * dy;
+  if (d2 >= r * r) return;
+
+  const dist = Math.sqrt(d2) || 0.001;
+  const nx = dx / dist, ny = dy / dist;
+  ball.nx += nx * (r - dist) / W;
+  ball.ny += ny * (r - dist) / H;
+
+  const pvx = ball.nvx * W, pvy = ball.nvy * H;
+  const dot = pvx * nx + pvy * ny;
+  if (dot < 0) {
+    ball.nvx = (pvx - (1 + CFG.restitution) * dot * nx) / W;
+    ball.nvy = (pvy - (1 + CFG.restitution) * dot * ny) / H;
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -450,14 +512,18 @@ function physicsStep(dt) {
 // ═══════════════════════════════════════════════════════
 function applyWindowFrame(dt) {
   const sx = window.screenX, sy = window.screenY;
-  const dx = sx - lastScreenX, dy = sy - lastScreenY;
+  // Clamp implausibly large jumps (e.g. RAF paused mid-drag) → less flicker.
+  let dx = clamp(sx - lastScreenX, -MAX_JUMP, MAX_JUMP);
+  let dy = clamp(sy - lastScreenY, -MAX_JUMP, MAX_JUMP);
   lastScreenX = sx; lastScreenY = sy;
   if ((dx === 0 && dy === 0) || dt <= 0 || W === 0 || H === 0) return;
 
   const nrX = CFG.radius / W, nr = CFG.radius / H;
-  const fvx = (dx / W) / dt, fvy = (dy / H) / dt;   // wall (frame) velocity, normalised/sec
+  // Wall (frame) velocity, normalised/sec — capped so a fast flick can't launch the ball.
+  const fvx = clamp((dx / W) / dt, -MAX_FRAME_V, MAX_FRAME_V);
+  const fvy = clamp((dy / H) / dt, -MAX_FRAME_V, MAX_FRAME_V);
 
-  ball.nx -= dx / W;
+  ball.nx -= dx / W;            // keep the ball fixed in screen space
   ball.ny -= dy / H;
 
   if (ball.nx < nrX)     { ball.nx = nrX;     ball.nvx = fvx; }   // shoved into left wall
@@ -502,6 +568,26 @@ function applyCrossfade() {
   const creativeActive = blend >= 0.5;
   sideCreative.style.pointerEvents = creativeActive ? 'auto' : 'none';
   sideProf.style.pointerEvents     = creativeActive ? 'none' : 'auto';
+}
+
+// Rotate both sides so the content stays upright vs gravity (mobile only).
+// Deadzone near the rest position; beyond it the layout re-aligns upright.
+// The rotor is scaled by (|sin|+|cos|) so the rotated box always covers the
+// viewport (no uncovered corners).
+function applyRotation() {
+  let target = 0;
+  if (sensorsActive) {
+    const phi = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;  // 0 at rest, ± when tilted
+    target = Math.abs(phi) <= ROT_DEAD ? 0 : -phi;
+  }
+  let d = target - rotAngle;
+  while (d >  180) d -= 360;
+  while (d < -180) d += 360;
+  rotAngle += d * ROT_EASE;
+
+  const rad = rotAngle * Math.PI / 180;
+  const s   = Math.abs(Math.sin(rad)) + Math.abs(Math.cos(rad));
+  rotor.style.transform = `rotate(${rotAngle}deg) scale(${s})`;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -562,6 +648,7 @@ function render() {
   blendTarget = computeBlendTarget();
   blend += (blendTarget - blend) * BLEND_EASE;
   applyCrossfade();
+  applyRotation();
 
   ctx.clearRect(0, 0, W, H);
   const px = ball.nx * W, py = ball.ny * H, r = CFG.radius;
@@ -607,7 +694,11 @@ function setupOrientation() {
         .then(s => {
           if (s === 'granted') {
             window.addEventListener('deviceorientation', onOrientation);
-            btn.style.display = 'none';
+            // Fade the button out, then drop it as an obstacle so the ball falls.
+            btn.dataset.disabled = '1';
+            btn.style.opacity = '0';
+            refreshObstacles();
+            setTimeout(() => { btn.style.display = 'none'; }, 300);
           }
         })
         .catch(() => {});
@@ -630,6 +721,17 @@ function setupToggle() {
       tog.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
     });
   });
+}
+
+// Creative side has horizontal slides — map vertical wheel (desktop mouse) to
+// horizontal scrolling so slides are reachable without a horizontal wheel.
+function setupCreativeWheel() {
+  const track = document.querySelector('#sideCreative .slides-h');
+  track.addEventListener('wheel', (e) => {
+    if (e.deltaY === 0) return;
+    e.preventDefault();
+    track.scrollLeft += e.deltaY;
+  }, { passive: false });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -663,6 +765,8 @@ renderSignText();
 updateSignButtons();
 setupOrientation();
 setupToggle();
+setupCreativeWheel();
+refreshObstacles();
 
 blend = blendTarget = computeBlendTarget();   // avoid an initial sweep
 applyCrossfade();
