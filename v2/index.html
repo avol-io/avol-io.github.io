@@ -15,8 +15,15 @@
       font-family: system-ui, sans-serif;
     }
 
-    /* ── Rotor wraps both sides; rotates to keep content upright ─ */
-    #rotor { position: fixed; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+    /* ── Rotor wraps both sides; JS sizes & rotates it to keep content
+       upright AND fill the screen in any physical orientation. ─────── */
+    #rotor {
+      position: fixed; top: 50%; left: 50%;
+      width: 100vw; height: 100dvh;
+      transform: translate(-50%, -50%);
+      transform-origin: 50% 50%;
+      will-change: transform;
+    }
 
     /* ── Two home "souls" — stacked full-screen layers ───────── */
     .side { position: absolute; inset: 0; }
@@ -38,7 +45,7 @@
     .slides-h {                         /* creative → horizontal scroll     */
       display: flex;
       overflow-x: auto; overflow-y: hidden;
-      scroll-snap-type: x mandatory;
+      scroll-snap-type: x proximity;    /* gentle snap — lets wheel scroll feel gradual */
     }
 
     .slide {
@@ -47,8 +54,8 @@
       align-items: center; justify-content: center;
       text-align: center; padding: 24px;
     }
-    .slides-v .slide { width: 100%;    height: 100dvh; }
-    .slides-h .slide { height: 100%;   width: 100vw; flex: 0 0 100vw; }
+    .slides-v .slide { width: 100%;  height: 100%; }
+    .slides-h .slide { width: 100%;  height: 100%; flex: 0 0 100%; }
 
     .slide h1 { font-size: clamp(2rem, 9vw, 6rem); font-weight: 800; letter-spacing: -.02em; }
     .slide p  { margin-top: 12px; opacity: .55; font-size: clamp(.9rem, 3vw, 1.2rem); }
@@ -283,8 +290,9 @@ const BLEND_EASE = 0.15;      // per-frame lerp toward target
 
 // Content rotation (mobile) — keep text upright vs gravity, with a deadzone
 // near each rest position so small tilts don't twitch the layout.
-const ROT_DEAD = 12;          // deg ignored before re-aligning upright
+const ROT_DEAD = 24;          // deg ignored (around each quarter-turn) before re-aligning
 const ROT_EASE = 0.18;        // per-frame lerp for content rotation
+const ROT_SIGN = 1;           // flip to -1 if content rotates the wrong way on device
 
 // Desktop window-as-frame tuning
 const MAX_FRAME_V = 2.5;      // cap on the wall "hit" velocity (normalised/sec)
@@ -540,15 +548,22 @@ function computeBlendTarget() {
   if (manualMode === 'creative') return 1;
 
   if (sensorsActive) {
-    // Mobile: derive from tilt with deadzones at the extremes.
-    const tiltDeg = Math.atan2(Math.abs(gVec.x), Math.abs(gVec.y)) * 180 / Math.PI;
-    return clamp((tiltDeg - TILT_LOW) / (TILT_HIGH - TILT_LOW), 0, 1);
+    // Mobile: a single "physical roll" = OS orientation (handles auto-rotate,
+    // robust on iPhone/iPad via getOrientAngle) + fine gravity tilt (handles
+    // the rotation-locked case). Works in both states; ±180 / 90-vs-270
+    // ambiguities cancel out under mod 180.
+    const fineTilt  = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;
+    const totalRoll = getOrientAngle() + fineTilt;
+    const rollMod   = ((totalRoll % 180) + 180) % 180;          // 0..180
+    const degFromPortrait = Math.min(rollMod, 180 - rollMod);   // 0 portrait .. 90 landscape
+    return clamp((degFromPortrait - TILT_LOW) / (TILT_HIGH - TILT_LOW), 0, 1);
   }
-  // Desktop: derive from window horizontal position vs screen centre.
+  // Desktop: the seam is anchored to the SCREEN's horizontal centre. It only
+  // shows inside the window where that centre falls; once the window clears the
+  // centre the gradient disappears → fully one mode. Left of seam = creative.
   const screenCenterX = (screen.availWidth || screen.width || window.innerWidth) / 2;
-  const winCenterX    = window.screenX + window.innerWidth / 2;
-  const offsetNorm    = clamp((winCenterX - screenCenterX) / screenCenterX, -1, 1);
-  return clamp(0.5 - offsetNorm * 0.5, 0, 1);          // centre=0.5, left→1, right→0
+  const seamFrac = (screenCenterX - window.screenX) / window.innerWidth;
+  return clamp(seamFrac, 0, 1);
 }
 
 function applyCrossfade() {
@@ -570,24 +585,49 @@ function applyCrossfade() {
   sideProf.style.pointerEvents     = creativeActive ? 'none' : 'auto';
 }
 
-// Rotate both sides so the content stays upright vs gravity (mobile only).
-// Deadzone near the rest position; beyond it the layout re-aligns upright.
-// The rotor is scaled by (|sin|+|cos|) so the rotated box always covers the
-// viewport (no uncovered corners).
+// Smallest scale that makes a (rw×rh) box, rotated by deg, fully cover the
+// (vw×vh) viewport — so there are never uncovered corners.
+function coverScale(rw, rh, deg, vw, vh) {
+  const r = deg * Math.PI / 180, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
+  const bw = rw * c + rh * s, bh = rw * s + rh * c;
+  return Math.max(vw / bw, vh / bh, 1);
+}
+
+// Keep the content upright vs gravity AND filling the screen (mobile only).
+// Only the rotation the OS did NOT already apply (fineTilt) is handled here:
+//   • auto-rotate ON  → OS reflows to landscape, fineTilt≈0 → no extra work
+//   • auto-rotate OFF → fineTilt grows to ~90°, we rotate AND swap the rotor's
+//     width/height so a portrait screen shows landscape content that fills.
+// A deadzone around each quarter-turn keeps it stable at rest.
 function applyRotation() {
-  let target = 0;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let q = 0, target = 0;
+
   if (sensorsActive) {
-    const phi = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;  // 0 at rest, ± when tilted
-    target = Math.abs(phi) <= ROT_DEAD ? 0 : -phi;
+    const fineTilt = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;  // signed roll within orientation
+    q = Math.round(fineTilt / 90);
+    const dev = fineTilt - q * 90;                                // distance from nearest quarter
+    const applied = Math.abs(dev) <= ROT_DEAD ? q * 90 : fineTilt;
+    q = Math.round(applied / 90);
+    target = ROT_SIGN * -applied;
   }
+
   let d = target - rotAngle;
   while (d >  180) d -= 360;
   while (d < -180) d += 360;
   rotAngle += d * ROT_EASE;
 
-  const rad = rotAngle * Math.PI / 180;
-  const s   = Math.abs(Math.sin(rad)) + Math.abs(Math.cos(rad));
-  rotor.style.transform = `rotate(${rotAngle}deg) scale(${s})`;
+  const swap = (Math.abs(q) % 2) === 1;                           // odd quarter → portrait↔landscape
+  const rw = swap ? vh : vw;
+  const rh = swap ? vw : vh;
+  const s  = coverScale(rw, rh, rotAngle, vw, vh);
+
+  if (rotor._rw !== rw || rotor._rh !== rh) {                     // avoid per-frame reflow
+    rotor.style.width  = rw + 'px';
+    rotor.style.height = rh + 'px';
+    rotor._rw = rw; rotor._rh = rh;
+  }
+  rotor.style.transform = `translate(-50%, -50%) rotate(${rotAngle}deg) scale(${s})`;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -728,9 +768,14 @@ function setupToggle() {
 function setupCreativeWheel() {
   const track = document.querySelector('#sideCreative .slides-h');
   track.addEventListener('wheel', (e) => {
-    if (e.deltaY === 0) return;
+    // Normalise wheel units (lines/pages → pixels) so movement is smooth/gradual
+    // instead of snapping abruptly to the next slide.
+    const dy = e.deltaMode === 1 ? e.deltaY * 16
+             : e.deltaMode === 2 ? e.deltaY * track.clientWidth
+             : e.deltaY;
+    if (dy === 0) return;
     e.preventDefault();
-    track.scrollLeft += e.deltaY;
+    track.scrollLeft += dy;
   }, { passive: false });
 }
 
