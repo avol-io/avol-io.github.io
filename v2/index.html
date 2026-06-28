@@ -167,7 +167,7 @@
       border-color: rgba(224,48,48,.6) !important;
       background: rgba(224,48,48,.18) !important;
     }
-    #blendReadout { margin-top: 6px; font-size: .68rem; opacity: .55; text-align: center; font-variant-numeric: tabular-nums; }
+    #blendReadout { margin-top: 6px; font-size: .68rem; opacity: .6; text-align: center; font-variant-numeric: tabular-nums; white-space: pre-line; line-height: 1.5; }
   </style>
 </head>
 <body>
@@ -364,6 +364,7 @@ const accFilt = { lr: 0, down: 1 };          // low-passed device gravity (left/
 let manualMode = 'auto';                     // 'auto' | 'pro' | 'creative'
 let blend = 0, blendTarget = 0;              // 0 = professional, 1 = creative
 let rotAngle = 0;                            // current content rotation (deg)
+let dbgFineTilt = 0, dbgSwap = false;        // debug diagnostics
 
 // desktop window-frame tracking
 let lastScreenX = window.screenX, lastScreenY = window.screenY;
@@ -622,14 +623,16 @@ function applyRotation() {
   const vw = window.innerWidth, vh = window.innerHeight;
   let q = 0, target = 0;
 
+  let fineTilt = 0;
   if (sensorsActive) {
-    const fineTilt = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;  // signed roll within orientation
+    fineTilt = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;        // signed roll within orientation
     q = Math.round(fineTilt / 90);
     const dev = fineTilt - q * 90;                                // distance from nearest quarter
     const applied = Math.abs(dev) <= ROT_DEAD ? q * 90 : fineTilt;
     q = Math.round(applied / 90);
     target = ROT_SIGN * -applied;
   }
+  dbgFineTilt = fineTilt;
 
   let d = target - rotAngle;
   while (d >  180) d -= 360;
@@ -637,6 +640,7 @@ function applyRotation() {
   rotAngle += d * ROT_EASE;
 
   const swap = (Math.abs(q) % 2) === 1;                           // odd quarter → portrait↔landscape
+  dbgSwap = swap;
   const rw = swap ? vh : vw;
   const rh = swap ? vw : vh;
   const s  = coverScale(rw, rh, rotAngle, vw, vh);
@@ -663,7 +667,9 @@ function updateDebug() {
   document.getElementById('calibSensorVals').textContent =
     `β ${rawBeta.toFixed(1)}° γ ${rawGamma.toFixed(1)}° · ${motionActive ? `a(${accFilt.lr.toFixed(2)},${accFilt.down.toFixed(2)})` : 'no motion'}`;
   document.getElementById('blendReadout').textContent =
-    `blend ${blend.toFixed(2)} · mode ${manualMode}${sensorsActive ? '' : ' · win'}`;
+    `blend ${blend.toFixed(2)} · mode ${manualMode}${motionActive ? '' : (sensorsActive ? ' · orient' : ' · win')}\n` +
+    `os ${getOrientAngle()}° · fine ${dbgFineTilt.toFixed(0)}° · rot ${rotAngle.toFixed(0)}° · ${dbgSwap ? 'swap' : 'no-swap'}\n` +
+    `gVec (${gVec.x.toFixed(2)}, ${gVec.y.toFixed(2)})`;
 
   drawArrow(arrowRawCtx,   58, rawGamma / 90, rawBeta / 90, '#4a9eff');
   drawArrow(arrowCalCtx,   58, gVec.x,        gVec.y,       '#e03030');
@@ -795,12 +801,12 @@ function setupToggle() {
 }
 
 // Creative side has horizontal slides — map vertical wheel (desktop mouse) to
-// horizontal scrolling so slides are reachable without a horizontal wheel.
-function setupCreativeWheel() {
+// horizontal scrolling 1:1, plus a "magnetic" glide to the nearest slide once
+// scrolling settles (done in JS so it doesn't fight the wheel mid-scroll).
+function setupCreativeScroll() {
   const track = document.querySelector('#sideCreative .slides-h');
+
   track.addEventListener('wheel', (e) => {
-    // Normalise wheel units (lines/pages → pixels) so movement is smooth/gradual
-    // instead of snapping abruptly to the next slide.
     const dy = e.deltaMode === 1 ? e.deltaY * 16
              : e.deltaMode === 2 ? e.deltaY * track.clientWidth
              : e.deltaY;
@@ -808,6 +814,21 @@ function setupCreativeWheel() {
     e.preventDefault();
     track.scrollLeft += dy;
   }, { passive: false });
+
+  let snapTimer, snapping = false;
+  track.addEventListener('scroll', () => {
+    if (snapping) return;
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(() => {                  // fires after scrolling/momentum stops
+      const w = track.clientWidth;
+      if (!w) return;
+      const target = Math.round(track.scrollLeft / w) * w;
+      if (Math.abs(target - track.scrollLeft) < 1) return;
+      snapping = true;
+      track.scrollTo({ left: target, behavior: 'smooth' });
+      setTimeout(() => { snapping = false; }, 400);
+    }, 140);
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -841,7 +862,7 @@ renderSignText();
 updateSignButtons();
 setupOrientation();
 setupToggle();
-setupCreativeWheel();
+setupCreativeScroll();
 refreshObstacles();
 
 blend = blendTarget = computeBlendTarget();   // avoid an initial sweep
