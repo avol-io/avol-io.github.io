@@ -2,98 +2,116 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Bouncing Ball</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Alessandro Avolio</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    html, body { height: 100%; }
     body {
       overflow: hidden;
       background: #0d0d0d;
+      color: #fff;
       font-family: system-ui, sans-serif;
     }
 
-    #world {
-      position: relative;
-      width: 100dvw;
-      height: 100dvh;
-      overflow: hidden;
+    /* ── Two home "souls" — stacked full-screen layers ───────── */
+    .side { position: fixed; inset: 0; }
+    #sideProfessional { z-index: 1; background: #0e141d; }   /* base layer  */
+    #sideCreative     { z-index: 2; background: #1d0f1a; }   /* revealed via mask */
+
+    /* ── Slide scaffolding (full-page, scroll-snap) ──────────── */
+    .slides {
+      width: 100%; height: 100%;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .slides::-webkit-scrollbar { display: none; }
+
+    .slides-v {                         /* professional → vertical scroll   */
+      overflow-x: hidden; overflow-y: auto;
+      scroll-snap-type: y mandatory;
+    }
+    .slides-h {                         /* creative → horizontal scroll     */
+      display: flex;
+      overflow-x: auto; overflow-y: hidden;
+      scroll-snap-type: x mandatory;
     }
 
+    .slide {
+      scroll-snap-align: start;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; padding: 24px;
+    }
+    .slides-v .slide { width: 100%;    height: 100dvh; }
+    .slides-h .slide { height: 100%;   width: 100vw; flex: 0 0 100vw; }
+
+    .slide h1 { font-size: clamp(2rem, 9vw, 6rem); font-weight: 800; letter-spacing: -.02em; }
+    .slide p  { margin-top: 12px; opacity: .55; font-size: clamp(.9rem, 3vw, 1.2rem); }
+    .slide small { margin-top: 28px; opacity: .35; font-size: .8rem; letter-spacing: .15em; text-transform: uppercase; }
+
+    /* ── Ball — fixed full-screen visual overlay ─────────────── */
     canvas#physicsCanvas {
-      position: absolute;
-      inset: 0;
+      position: fixed; inset: 0;
       display: block;
       z-index: 5;
+      pointer-events: none;             /* clicks/scroll pass through to slides */
     }
 
-    .obstacle {
-      position: absolute;
-      background: #3a6ea5;
-      border-radius: 6px;
-      z-index: 3;
-      pointer-events: auto;
+    /* ── Top 3-state mode toggle ─────────────────────────────── */
+    #modeToggle {
+      position: fixed;
+      top: max(14px, env(safe-area-inset-top));
+      left: 50%; transform: translateX(-50%);
+      z-index: 30;
+      display: flex;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 999px;
+      padding: 4px;
+      user-select: none;
     }
+    #modeToggle button {
+      border: none; background: transparent; color: #fff;
+      font: inherit; font-size: .8rem; font-weight: 600;
+      padding: 7px 16px; border-radius: 999px; cursor: pointer;
+      opacity: .6; transition: background .15s, opacity .15s;
+    }
+    #modeToggle button:hover { opacity: .9; }
+    #modeToggle button.active { background: rgba(255,255,255,.16); opacity: 1; }
 
+    /* ── Sensor permission button (mobile / iOS) ─────────────── */
     #permBtn {
-      position: absolute;
-      left: 50%;
-      bottom: 20%;
+      position: fixed;
+      left: 50%; bottom: 14%;
       transform: translateX(-50%);
-      background: #e03030;
-      color: #fff;
-      font-size: 1rem;
-      font-weight: 600;
+      z-index: 20;
+      display: none;                    /* shown only when sensors need a prompt */
+      background: #e03030; color: #fff;
+      font-size: 1rem; font-weight: 600;
       padding: 14px 36px;
-      border: none;
-      border-radius: 50px;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(224,48,48,0.35);
-      z-index: 10;
+      border: none; border-radius: 50px; cursor: pointer;
+      box-shadow: 0 4px 12px rgba(224,48,48,.35);
     }
-
-    #colorOverlay {
-      position: absolute;
-      inset: 0;
-      z-index: 2;
-      overflow: hidden;
-      pointer-events: auto;
-    }
-
-    #overlayGreen, #overlayRed {
-      position: absolute;
-      inset: 0; display: flex;
-    }
-
-    #overlayGreen { background: #00aa00; }
-    #overlayRed   { background: #cc0000; }
     #permBtn:hover  { background: #c02020; }
     #permBtn:active { transform: translateX(-50%) translateY(1px); }
 
-    /* ── Physics controls ───────────────────────── */
+    /* ── Dev panels (hidden unless ?debug) ───────────────────── */
+    body:not(.debug) #calib,
+    body:not(.debug) #controls { display: none !important; }
+
     #controls {
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      z-index: 50;
-      background: rgba(0,0,0,.65);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 12px;
-      padding: 12px 14px;
-      color: #fff;
-      font-size: .78rem;
-      min-width: 200px;
-      user-select: none;
+      position: fixed; bottom: 16px; right: 16px; z-index: 50;
+      background: rgba(0,0,0,.65); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+      padding: 12px 14px; color: #fff; font-size: .78rem;
+      min-width: 200px; user-select: none;
     }
     #controls summary {
-      cursor: pointer;
-      font-weight: 700;
-      font-size: .85rem;
-      list-style: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      cursor: pointer; font-weight: 700; font-size: .85rem;
+      list-style: none; display: flex; align-items: center; gap: 6px;
     }
     #controls summary::before { content: '⚙️'; }
     #controls .ctrl-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -109,33 +127,19 @@
     }
     #resetBtn:hover { background: rgba(255,255,255,.1); }
 
-    /* ── Debug panel ────────────────────────────── */
     #calib {
-      position: fixed;
-      top: 16px;
-      left: 16px;
-      z-index: 50;
-      background: rgba(0,0,0,.72);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 12px;
-      padding: 10px 12px;
-      color: #fff;
-      font-size: .76rem;
-      width: 248px;
-      user-select: none;
+      position: fixed; top: 16px; left: 16px; z-index: 50;
+      background: rgba(0,0,0,.72); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+      padding: 10px 12px; color: #fff; font-size: .76rem;
+      width: 248px; user-select: none;
     }
     #calibOrient { font-weight: 700; font-size: .8rem; margin-bottom: 1px; }
     #calibSensorVals {
-      font-size: .68rem; opacity: .55;
-      font-variant-numeric: tabular-nums;
+      font-size: .68rem; opacity: .55; font-variant-numeric: tabular-nums;
       margin-bottom: 8px; letter-spacing: .02em;
     }
-    .arrows-row {
-      display: flex; gap: 6px;
-      justify-content: space-around;
-      margin-bottom: 8px;
-    }
+    .arrows-row { display: flex; gap: 6px; justify-content: space-around; margin-bottom: 8px; }
     .arrow-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; }
     .arrow-label { font-size: .63rem; opacity: .65; text-align: center; line-height: 1.2; }
     .arrow-canvas { border-radius: 50%; display: block; }
@@ -152,20 +156,55 @@
       border-color: rgba(224,48,48,.6) !important;
       background: rgba(224,48,48,.18) !important;
     }
+    #blendReadout { margin-top: 6px; font-size: .68rem; opacity: .55; text-align: center; font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
 
-<div id="world">
-  <canvas id="physicsCanvas"></canvas>
-  <div id="colorOverlay">
-    <div id="overlayGreen"><button style="margin:auto" onclick="alert('verde')">Verde</button></div>
-    <div id="overlayRed"><button style="margin:auto" onclick="alert('rosso')">Verde</button></div>
+<!-- ── Professional side (base layer, vertical slides) ───────── -->
+<div id="sideProfessional" class="side">
+  <div class="slides slides-v">
+    <section class="slide">
+      <h1>Professionale</h1>
+      <p>Qui andrà il contenuto professionale.</p>
+      <small>scorri ↓</small>
+    </section>
+    <section class="slide">
+      <h1>Esperienza</h1>
+      <p>Slide professionale placeholder.</p>
+    </section>
   </div>
-  <button id="permBtn" class="obstacle">🔄 Abilita sensori</button>
 </div>
 
-<!-- ── Debug panel ───────────────────────────── -->
+<!-- ── Creative side (revealed via mask, horizontal slides) ──── -->
+<div id="sideCreative" class="side">
+  <div class="slides slides-h">
+    <section class="slide">
+      <h1>Creativo</h1>
+      <p>Qui andrà il contenuto creativo / personale.</p>
+      <small>scorri →</small>
+    </section>
+    <section class="slide">
+      <h1>Progetti</h1>
+      <p>Slide creativa placeholder.</p>
+    </section>
+  </div>
+</div>
+
+<!-- ── Ball overlay ─────────────────────────────────────────── -->
+<canvas id="physicsCanvas"></canvas>
+
+<!-- ── Mode toggle ──────────────────────────────────────────── -->
+<div id="modeToggle">
+  <button data-mode="pro">Professionale</button>
+  <button data-mode="auto" class="active">Auto</button>
+  <button data-mode="creative">Creativo</button>
+</div>
+
+<!-- ── Sensor permission (mobile) ───────────────────────────── -->
+<button id="permBtn">🔄 Abilita sensori</button>
+
+<!-- ── Debug panel (hidden unless ?debug) ───────────────────── -->
 <div id="calib">
   <div id="calibOrient">Orientamento: —</div>
   <div id="calibSensorVals">β —°  γ —°</div>
@@ -192,10 +231,10 @@
     <button id="btnFlipY">↕ Inverti Y</button>
     <button id="btnReset">↺ Reset</button>
   </div>
-  <div id="version">5</div>
+  <div id="blendReadout">blend — · mode —</div>
 </div>
 
-<!-- ── Physics controls ───────────────────── -->
+<!-- ── Physics controls (hidden unless ?debug) ──────────────── -->
 <details id="controls" open>
   <summary>Fisica</summary>
   <div class="ctrl-body">
@@ -225,57 +264,38 @@
 // ═══════════════════════════════════════════════════════
 const CFG = { gravity: 980, restitution: 0.72, friction: 0.985, radius: 22 };
 const LS_KEY = 'ball-sign-calibration-v2';
+const DEBUG  = new URLSearchParams(location.search).has('debug');
+
+// Blend deadzones (mobile tilt → degrees). 0..LOW stays professional,
+// HIGH..90 stays creative, transition only in the central band.
+const TILT_LOW = 30, TILT_HIGH = 60;
+const FEATHER  = 24;          // px feather on the crossfade seam
+const BLEND_EASE = 0.15;      // per-frame lerp toward target
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ═══════════════════════════════════════════════════════
-//  DEVICE NATURAL ORIENTATION — detected lazily
-//
-//  We cannot rely on screen.width/height (hardware constants
-//  that ignore rotation) nor on the container at page-load
-//  (layout may not have settled yet, and sensors aren't active).
-//
-//  On the FIRST deviceorientation event we read:
-//    • the container's actual rendered dimensions → portrait or landscape NOW?
-//    • the raw screen.orientation.angle           → what does the OS call this?
-//
-//  From those two facts we derive whether the device's natural
-//  orientation is landscape (iPad) or portrait (iPhone/iPod):
-//
+//  DEVICE NATURAL ORIENTATION — detected lazily (see notes below)
 //    naturalIsLandscape = (containerIsLandscape) === (rawAngle is 0° or 180°)
-//
-//  Proof by cases:
-//    iPad  landscape (normal):   w>h ✓, angle=0  ✓  →  true  ✓
-//    iPad  portrait  (rotated):  w>h ✗, angle=90 ✗  →  true  ✓
-//    iPhone portrait (normal):   w>h ✗, angle=0  ✓  →  false ✓
-//    iPhone landscape (rotated): w>h ✓, angle=90 ✗  →  false ✓
 // ═══════════════════════════════════════════════════════
-let naturalIsLandscape = false; // refined on first sensor event, see detectNaturalOrientation()
+let naturalIsLandscape = false;
 
 function detectNaturalOrientation() {
-  const wr  = world.getBoundingClientRect();
+  const landscapeNow = window.innerWidth > window.innerHeight;
   const raw = screen.orientation?.angle ?? Math.abs(window.orientation ?? 0);
-  naturalIsLandscape = (wr.width > wr.height) === (raw === 0 || raw === 180);
+  naturalIsLandscape = landscapeNow === (raw === 0 || raw === 180);
 }
 
 function getOrientAngle() {
   let a = 0;
   if (screen.orientation?.angle !== undefined) a = screen.orientation.angle;
   else if (typeof window.orientation === 'number') a = ((window.orientation % 360) + 360) % 360;
-  if (naturalIsLandscape) {
-    // iPad natural = landscape. screen.orientation.angle misura la rotazione CW
-    // dal landscape naturale. Per normalizzare a un sistema portrait-centrico
-    // dobbiamo INVERTIRE la direzione della rotazione, non aggiungerle 90°.
-    //   raw=0°  (landscape)  → 90°   ✓
-    //   raw=90° (portrait)   → 0°    ✓  (era 180° con +90°, causava inversione X/Y)
-    //   raw=180° (land. flip)→ 270°
-    //   raw=270° (port. flip)→ 180°
-    return (90 - a + 360) % 360;
-  }
+  if (naturalIsLandscape) return (90 - a + 360) % 360;   // iPad natural = landscape
   return a;
 }
 
 // ═══════════════════════════════════════════════════════
-//  MANUAL SIGN CORRECTIONS  (fallback only)
-//  xSign / ySign are always in screen-axis space.
+//  MANUAL SIGN CORRECTIONS (fallback only) — screen-axis space
 // ═══════════════════════════════════════════════════════
 function loadSigns() {
   try {
@@ -283,13 +303,10 @@ function loadSigns() {
     return { xSign: raw?.xSign === -1 ? -1 : 1, ySign: raw?.ySign === -1 ? -1 : 1 };
   } catch { return { xSign: 1, ySign: 1 }; }
 }
-
 function saveSigns() {
   localStorage.setItem(LS_KEY, JSON.stringify(SIGNS));
-  renderSignText();
-  updateSignButtons();
+  renderSignText(); updateSignButtons();
 }
-
 function renderSignText() {
   const parts = [];
   if (SIGNS.xSign < 0) parts.push('X invertito');
@@ -297,57 +314,60 @@ function renderSignText() {
   document.getElementById('calibText').textContent =
     parts.length ? `Correzioni: ${parts.join(', ')}` : 'Correzioni: nessuna';
 }
-
 function updateSignButtons() {
   document.getElementById('btnFlipX').classList.toggle('btn-active', SIGNS.xSign < 0);
   document.getElementById('btnFlipY').classList.toggle('btn-active', SIGNS.ySign < 0);
 }
-
 let SIGNS = loadSigns();
 
 // ═══════════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════════
-const gVec = { x: 0, y: 1 };
-const ball  = { nx: 0.5, ny: 0.25, nvx: 0, nvy: 0 };
-let obstacles = [];
+const gVec = { x: 0, y: 1 };                 // gravity direction (desktop default = down)
+const ball = { nx: 0.5, ny: 0.25, nvx: 0, nvy: 0 };
 let W = 0, H = 0;
 let lastOrientAngle = getOrientAngle();
 let rawBeta = 0, rawGamma = 0;
+
+let sensorsActive = false;                   // true once real orientation events arrive
+let manualMode = 'auto';                     // 'auto' | 'pro' | 'creative'
+let blend = 0, blendTarget = 0;              // 0 = professional, 1 = creative
+
+// desktop window-frame tracking
+let lastScreenX = window.screenX, lastScreenY = window.screenY;
 
 // ═══════════════════════════════════════════════════════
 //  DOM
 // ═══════════════════════════════════════════════════════
 const physCanvas    = document.getElementById('physicsCanvas');
 const ctx           = physCanvas.getContext('2d');
-const world         = document.getElementById('world');
-const overlayRedEl  = document.getElementById('overlayRed');
+const sideProf      = document.getElementById('sideProfessional');
+const sideCreative  = document.getElementById('sideCreative');
 const arrowRawCtx   = document.getElementById('arrowRaw').getContext('2d');
 const arrowCalCtx   = document.getElementById('arrowCal').getContext('2d');
 const arrowGammaCtx = document.getElementById('arrowGamma').getContext('2d');
 
+if (DEBUG) document.body.classList.add('debug');
+
 // ═══════════════════════════════════════════════════════
-//  DEVICE ORIENTATION
-//
-//  W3C axes are fixed to the device body (not the screen):
-//    gamma → physical left/right tilt  (device Y axis)
-//    beta  → physical fwd/back tilt    (device X axis)
-//
-//  Mapping to screen axes for each normalised screen angle:
-//    0°  portrait           → screenX =  gamma,  screenY =  beta
-//    90° landscape right    → screenX =  beta,   screenY = -gamma
-//   180° portrait flipped   → screenX = -gamma,  screenY = -beta
-//   270° landscape left     → screenX = -beta,   screenY =  gamma
+//  DEVICE ORIENTATION (mobile)
+//    W3C axes are fixed to the device body:
+//      gamma → physical left/right tilt,  beta → physical fwd/back tilt
+//    Mapping to screen axes per normalised screen angle below.
 // ═══════════════════════════════════════════════════════
 let orientationDetected = false;
 
 function onOrientation(e) {
-  // Detect natural orientation once, on the first real sensor event,
-  // when the container layout is guaranteed to reflect the current rotation.
+  // Ignore phantom events (desktop browsers fire null-valued ones).
+  if (e.beta == null && e.gamma == null) return;
+
+  if (!sensorsActive) {
+    sensorsActive = true;
+    gVec.x = 0; gVec.y = 1;
+  }
   if (!orientationDetected) {
     detectNaturalOrientation();
     orientationDetected = true;
-    // Re-sync lastOrientAngle now that naturalIsLandscape is correct
     lastOrientAngle = getOrientAngle();
   }
 
@@ -365,12 +385,8 @@ function onOrientation(e) {
     default:  sx =  g; sy =  b;   // 0° — portrait
   }
 
-  gVec.x = Math.max(-1, Math.min(1, sx * SIGNS.xSign));
-  gVec.y = Math.max(-1, Math.min(1, sy * SIGNS.ySign));
-}
-
-function startOrientation() {
-  window.addEventListener('deviceorientation', onOrientation);
+  gVec.x = clamp(sx * SIGNS.xSign, -1, 1);
+  gVec.y = clamp(sy * SIGNS.ySign, -1, 1);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -379,9 +395,8 @@ function startOrientation() {
 function onResize() {
   const newAngle = getOrientAngle();
   const rotated  = newAngle !== lastOrientAngle;
-  const wr = world.getBoundingClientRect();
 
-  if (rotated) {
+  if (rotated && sensorsActive) {
     const delta = ((newAngle - lastOrientAngle) + 360) % 360;
     let nx, ny, nvx, nvy;
     if (delta === 90) {
@@ -391,33 +406,14 @@ function onResize() {
     } else {
       nx = 1 - ball.nx; ny = 1 - ball.ny; nvx = -ball.nvx; nvy = -ball.nvy;
     }
-    ball.nx  = Math.min(Math.max(nx,  0), 1);
-    ball.ny  = Math.min(Math.max(ny,  0), 1);
+    ball.nx  = clamp(nx, 0, 1);
+    ball.ny  = clamp(ny, 0, 1);
     ball.nvx = nvx; ball.nvy = nvy;
-    lastOrientAngle = newAngle;
   }
+  lastOrientAngle = newAngle;
 
-  W = physCanvas.width  = wr.width;
-  H = physCanvas.height = wr.height;
-  refreshObstacles();
-}
-
-// ═══════════════════════════════════════════════════════
-//  OBSTACLES
-// ═══════════════════════════════════════════════════════
-function refreshObstacles() {
-  obstacles = [];
-  const wr = world.getBoundingClientRect();
-  document.querySelectorAll('.obstacle').forEach(el => {
-    if (el.id === 'permBtn' && el.dataset.disabled === '1') return;
-    const r = el.getBoundingClientRect();
-    obstacles.push({
-      nx: (r.left - wr.left) / wr.width,
-      ny: (r.top  - wr.top)  / wr.height,
-      nw: r.width  / wr.width,
-      nh: r.height / wr.height,
-    });
-  });
+  W = physCanvas.width  = window.innerWidth;
+  H = physCanvas.height = window.innerHeight;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -428,7 +424,8 @@ const MAX_ACCUM = FIXED_DT * 8;
 let accumulator = 0, lastTime = null;
 
 function physicsStep(dt) {
-  const nr = H > 0 ? CFG.radius / H : 0;
+  const nr  = H > 0 ? CFG.radius / H : 0;
+  const nrX = W > 0 ? CFG.radius / W : 0;
   const gnX = W > 0 ? CFG.gravity / W : 0;
   const gnY = H > 0 ? CFG.gravity / H : 0;
 
@@ -439,55 +436,88 @@ function physicsStep(dt) {
   ball.nx  += ball.nvx * dt;
   ball.ny  += ball.nvy * dt;
 
-  const nrX = nr * (H / W);
-  if (ball.nx - nrX < 0) { ball.nx =      nrX; ball.nvx =  Math.abs(ball.nvx) * CFG.restitution; }
-  if (ball.nx + nrX > 1) { ball.nx = 1  - nrX; ball.nvx = -Math.abs(ball.nvx) * CFG.restitution; }
-  if (ball.ny - nr  < 0) { ball.ny =       nr;  ball.nvy =  Math.abs(ball.nvy) * CFG.restitution; }
-  if (ball.ny + nr  > 1) { ball.ny = 1  -  nr;  ball.nvy = -Math.abs(ball.nvy) * CFG.restitution; }
-
-  for (const ob of obstacles) resolveAABB(ob);
+  if (ball.nx - nrX < 0) { ball.nx =     nrX; ball.nvx =  Math.abs(ball.nvx) * CFG.restitution; }
+  if (ball.nx + nrX > 1) { ball.nx = 1 - nrX; ball.nvx = -Math.abs(ball.nvx) * CFG.restitution; }
+  if (ball.ny - nr  < 0) { ball.ny =      nr; ball.nvy =  Math.abs(ball.nvy) * CFG.restitution; }
+  if (ball.ny + nr  > 1) { ball.ny = 1 -  nr; ball.nvy = -Math.abs(ball.nvy) * CFG.restitution; }
 }
 
-function resolveAABB(ob) {
-  const bx = ball.nx * W, by = ball.ny * H, r = CFG.radius;
-  const ox = ob.nx * W,   oy = ob.ny * H;
-  const ow = ob.nw * W,   oh = ob.nh * H;
+// ═══════════════════════════════════════════════════════
+//  DESKTOP — window is a moving frame over a screen-fixed ball
+//  Compensate the ball by the window delta so it stays put in
+//  screen space; when it reaches a border, the wall carries it
+//  (imparts the frame velocity) → the "hit".
+// ═══════════════════════════════════════════════════════
+function applyWindowFrame(dt) {
+  const sx = window.screenX, sy = window.screenY;
+  const dx = sx - lastScreenX, dy = sy - lastScreenY;
+  lastScreenX = sx; lastScreenY = sy;
+  if ((dx === 0 && dy === 0) || dt <= 0 || W === 0 || H === 0) return;
 
-  const cx = Math.max(ox, Math.min(bx, ox + ow));
-  const cy = Math.max(oy, Math.min(by, oy + oh));
-  const dx = bx - cx, dy = by - cy;
-  const d2 = dx * dx + dy * dy;
-  if (d2 >= r * r) return;
+  const nrX = CFG.radius / W, nr = CFG.radius / H;
+  const fvx = (dx / W) / dt, fvy = (dy / H) / dt;   // wall (frame) velocity, normalised/sec
 
-  const dist = Math.sqrt(d2) || 0.001;
-  const nx = dx / dist, ny = dy / dist;
-  ball.nx += nx * (r - dist) / W;
-  ball.ny += ny * (r - dist) / H;
+  ball.nx -= dx / W;
+  ball.ny -= dy / H;
 
-  const pvx = ball.nvx * W, pvy = ball.nvy * H;
-  const dot = pvx * nx + pvy * ny;
-  if (dot < 0) {
-    ball.nvx = (pvx - (1 + CFG.restitution) * dot * nx) / W;
-    ball.nvy = (pvy - (1 + CFG.restitution) * dot * ny) / H;
+  if (ball.nx < nrX)     { ball.nx = nrX;     ball.nvx = fvx; }   // shoved into left wall
+  if (ball.nx > 1 - nrX) { ball.nx = 1 - nrX; ball.nvx = fvx; }   // shoved into right wall
+  if (ball.ny < nr)      { ball.ny = nr;      ball.nvy = fvy; }   // top
+  if (ball.ny > 1 - nr)  { ball.ny = 1 - nr;  ball.nvy = fvy; }   // bottom
+}
+
+// ═══════════════════════════════════════════════════════
+//  BLEND  (0 = professional, 1 = creative)
+// ═══════════════════════════════════════════════════════
+function computeBlendTarget() {
+  if (manualMode === 'pro')      return 0;
+  if (manualMode === 'creative') return 1;
+
+  if (sensorsActive) {
+    // Mobile: derive from tilt with deadzones at the extremes.
+    const tiltDeg = Math.atan2(Math.abs(gVec.x), Math.abs(gVec.y)) * 180 / Math.PI;
+    return clamp((tiltDeg - TILT_LOW) / (TILT_HIGH - TILT_LOW), 0, 1);
   }
+  // Desktop: derive from window horizontal position vs screen centre.
+  const screenCenterX = (screen.availWidth || screen.width || window.innerWidth) / 2;
+  const winCenterX    = window.screenX + window.innerWidth / 2;
+  const offsetNorm    = clamp((winCenterX - screenCenterX) / screenCenterX, -1, 1);
+  return clamp(0.5 - offsetNorm * 0.5, 0, 1);          // centre=0.5, left→1, right→0
+}
+
+function applyCrossfade() {
+  if (blend <= 0.002) {
+    sideCreative.style.display = 'none';            // fully professional
+  } else {
+    sideCreative.style.display = '';
+    let mask = 'none';                              // blend≈1 → creative fully covers
+    if (blend < 0.998) {
+      const pct = blend * 100;
+      mask = `linear-gradient(90deg, #000 calc(${pct}% - ${FEATHER}px), transparent calc(${pct}% + ${FEATHER}px))`;
+    }
+    sideCreative.style.webkitMaskImage = mask;
+    sideCreative.style.maskImage       = mask;
+  }
+
+  const creativeActive = blend >= 0.5;
+  sideCreative.style.pointerEvents = creativeActive ? 'auto' : 'none';
+  sideProf.style.pointerEvents     = creativeActive ? 'none' : 'auto';
 }
 
 // ═══════════════════════════════════════════════════════
 //  DEBUG
 // ═══════════════════════════════════════════════════════
-const ORIENT_NAMES = {
-  0: 'Portrait ↑', 90: 'Landscape →', 180: 'Portrait ↓', 270: 'Landscape ←',
-};
+const ORIENT_NAMES = { 0: 'Portrait ↑', 90: 'Landscape →', 180: 'Portrait ↓', 270: 'Landscape ←' };
 
 function updateDebug() {
   const angle = getOrientAngle();
-  const tag   = orientationDetected
+  const tag   = sensorsActive
     ? (naturalIsLandscape ? ' (iPad/landscape)' : ' (iPhone/portrait)')
-    : ' (in attesa…)';
-  document.getElementById('calibOrient').textContent =
-    (ORIENT_NAMES[angle] ?? angle + '°') + tag;
-  document.getElementById('calibSensorVals').textContent =
-    `β ${rawBeta.toFixed(1)}°  γ ${rawGamma.toFixed(1)}°`;
+    : ' (desktop)';
+  document.getElementById('calibOrient').textContent = (ORIENT_NAMES[angle] ?? angle + '°') + tag;
+  document.getElementById('calibSensorVals').textContent = `β ${rawBeta.toFixed(1)}°  γ ${rawGamma.toFixed(1)}°`;
+  document.getElementById('blendReadout').textContent =
+    `blend ${blend.toFixed(2)} · mode ${manualMode}${sensorsActive ? '' : ' · win'}`;
 
   drawArrow(arrowRawCtx,   58, rawGamma / 90, rawBeta / 90, '#4a9eff');
   drawArrow(arrowCalCtx,   58, gVec.x,        gVec.y,       '#e03030');
@@ -497,10 +527,8 @@ function updateDebug() {
 function drawArrow(actx, size, x, y, color) {
   const cx = size / 2, cy = size / 2, r = size / 2 - 1;
   actx.clearRect(0, 0, size, size);
-
   actx.fillStyle = 'rgba(18,18,18,0.88)';
   actx.beginPath(); actx.arc(cx, cy, r, 0, Math.PI * 2); actx.fill();
-
   actx.strokeStyle = 'rgba(255,255,255,0.1)'; actx.lineWidth = 1;
   actx.beginPath();
   actx.moveTo(cx - r + 4, cy); actx.lineTo(cx + r - 4, cy);
@@ -513,15 +541,12 @@ function drawArrow(actx, size, x, y, color) {
     actx.beginPath(); actx.arc(cx, cy, 3, 0, Math.PI * 2); actx.fill();
     return;
   }
-
   const nx  = x / mag, ny = y / mag;
   const len = Math.min(mag, 1) * (r - 8);
   const ex  = cx + nx * len, ey = cy + ny * len;
   const ang = Math.atan2(ny, nx);
-
   actx.strokeStyle = color; actx.lineWidth = 2.2; actx.lineCap = 'round';
   actx.beginPath(); actx.moveTo(cx, cy); actx.lineTo(ex, ey); actx.stroke();
-
   actx.fillStyle = color;
   actx.beginPath();
   actx.moveTo(ex, ey);
@@ -531,26 +556,13 @@ function drawArrow(actx, size, x, y, color) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  OVERLAY
-// ═══════════════════════════════════════════════════════
-function updateOverlay() {
-  const tiltDeg = Math.atan2(Math.abs(gVec.x), Math.abs(gVec.y)) * 180 / Math.PI;
-  const LOW = 5, HIGH = 85;
-  const t = Math.max(0, Math.min(1, (tiltDeg - LOW) / (HIGH - LOW)));
-
-  const cssAngle = Math.atan2(gVec.x, -gVec.y) * 180 / Math.PI;
-  const tp = (1 - t) * 100;
-  const FEATHER = 20;
-
-  const mask = `linear-gradient(${cssAngle}deg, black calc(${tp}% - ${FEATHER}px), transparent calc(${tp}% + ${FEATHER}px))`;
-  overlayRedEl.style.webkitMaskImage = mask;
-  overlayRedEl.style.maskImage = mask;
-}
-
-// ═══════════════════════════════════════════════════════
 //  RENDER
 // ═══════════════════════════════════════════════════════
 function render() {
+  blendTarget = computeBlendTarget();
+  blend += (blendTarget - blend) * BLEND_EASE;
+  applyCrossfade();
+
   ctx.clearRect(0, 0, W, H);
   const px = ball.nx * W, py = ball.ny * H, r = CFG.radius;
 
@@ -563,8 +575,7 @@ function render() {
   ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
   ctx.fillStyle = grad; ctx.fill();
 
-  updateOverlay();
-  updateDebug();
+  if (DEBUG) updateDebug();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -575,6 +586,9 @@ function loop(ts) {
   if (lastTime === null) lastTime = ts;
   const raw = Math.min((ts - lastTime) / 1000, MAX_ACCUM);
   lastTime = ts;
+
+  if (!sensorsActive) applyWindowFrame(raw);   // desktop: window-as-frame
+
   accumulator += raw;
   while (accumulator >= FIXED_DT) { physicsStep(FIXED_DT); accumulator -= FIXED_DT; }
   render();
@@ -585,24 +599,37 @@ function loop(ts) {
 // ═══════════════════════════════════════════════════════
 function setupOrientation() {
   const btn = document.getElementById('permBtn');
-  const markEnabled = () => {
-    btn.dataset.disabled = '1';
-    btn.style.pointerEvents = 'none';
-    btn.style.opacity = '0.4';
-    btn.textContent = '✔ Sensori abilitati';
-    startOrientation();
-    refreshObstacles();
-  };
   if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+    // iOS — needs an explicit user gesture.
     btn.style.display = 'inline-block';
     btn.addEventListener('click', () => {
       DeviceOrientationEvent.requestPermission()
-        .then(s => { if (s === 'granted') markEnabled(); })
+        .then(s => {
+          if (s === 'granted') {
+            window.addEventListener('deviceorientation', onOrientation);
+            btn.style.display = 'none';
+          }
+        })
         .catch(() => {});
     });
   } else if (window.DeviceOrientationEvent) {
-    markEnabled();
+    // Android / desktop — listen directly; desktop simply never fires real events
+    // (or fires null-valued ones, ignored in onOrientation) → stays desktop mode.
+    window.addEventListener('deviceorientation', onOrientation);
   }
+}
+
+// ═══════════════════════════════════════════════════════
+//  MODE TOGGLE
+// ═══════════════════════════════════════════════════════
+function setupToggle() {
+  const tog = document.getElementById('modeToggle');
+  tog.querySelectorAll('button').forEach(b => {
+    b.addEventListener('click', () => {
+      manualMode = b.dataset.mode;
+      tog.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+    });
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -617,22 +644,28 @@ bindSlider('slRestitution', 'valRestitution', 'restitution');
 bindSlider('slFriction',    'valFriction',    'friction');
 bindSlider('slRadius',      'valRadius',      'radius');
 
-document.getElementById('resetBtn').addEventListener('click',  () => {
+document.getElementById('resetBtn').addEventListener('click', () => {
   ball.nx = 0.5; ball.ny = 0.25; ball.nvx = 0; ball.nvy = 0;
 });
 document.getElementById('btnFlipX').addEventListener('click', () => { SIGNS.xSign *= -1; saveSigns(); });
 document.getElementById('btnFlipY').addEventListener('click', () => { SIGNS.ySign *= -1; saveSigns(); });
-document.getElementById('btnReset').addEventListener('click',  () => { SIGNS = { xSign: 1, ySign: 1 }; saveSigns(); });
+document.getElementById('btnReset').addEventListener('click', () => { SIGNS = { xSign: 1, ySign: 1 }; saveSigns(); });
 
 if (screen.orientation) screen.orientation.addEventListener('change', onResize);
 window.addEventListener('orientationchange', onResize);
-new ResizeObserver(onResize).observe(world);
+window.addEventListener('resize', onResize);
 
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
 onResize();
 renderSignText();
 updateSignButtons();
 setupOrientation();
-refreshObstacles();
+setupToggle();
+
+blend = blendTarget = computeBlendTarget();   // avoid an initial sweep
+applyCrossfade();
 requestAnimationFrame(loop);
 </script>
 </body>
