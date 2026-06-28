@@ -435,8 +435,10 @@ function onMotion(e) {
   motionActive = true;
   if (!sensorsActive) sensorsActive = true;
 
-  const gx = clamp((a.x ?? 0) / G_NORM, -1, 1);      // gravity toward device right
-  const gy = clamp((a.y ?? 0) / G_NORM, -1, 1);      // gravity toward device top
+  // accelerationIncludingGravity points opposite to the gravity direction, so
+  // negate it to get the true gravity vector in the device frame.
+  const gx = clamp(-(a.x ?? 0) / G_NORM, -1, 1);     // gravity toward device right
+  const gy = clamp(-(a.y ?? 0) / G_NORM, -1, 1);     // gravity toward device top
   gFilt.x += (gx - gFilt.x) * 0.25;                  // light low-pass vs shake noise
   gFilt.y += (gy - gFilt.y) * 0.25;
   setScreenGravity(gFilt.x, gFilt.y);
