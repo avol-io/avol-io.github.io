@@ -360,7 +360,7 @@ let rawBeta = 0, rawGamma = 0;
 
 let sensorsActive = false;                   // true once real sensor events arrive
 let motionActive  = false;                   // devicemotion gravity available (preferred source)
-const accFilt = { lr: 0, down: 1 };          // low-passed device gravity (left/right, down-screen)
+const gFilt = { x: 0, y: -1 };               // low-passed device-frame gravity (a≈gravity dir)
 let manualMode = 'auto';                     // 'auto' | 'pro' | 'creative'
 let blend = 0, blendTarget = 0;              // 0 = professional, 1 = creative
 let rotAngle = 0;                            // current content rotation (deg)
@@ -391,15 +391,18 @@ if (DEBUG) document.body.classList.add('debug');
 // ═══════════════════════════════════════════════════════
 let orientationDetected = false;
 
-// Map device-frame gravity (left/right, down-the-screen with +1 at upright) to
-// screen axes for the current orientation, then apply manual sign calibration.
-function setScreenGravity(devLR, devDown) {
+// Map device-frame gravity to screen axes for the current orientation, then
+// apply manual sign calibration. (gx = gravity toward device right edge,
+// gy = gravity toward device top edge; accelerationIncludingGravity ≈ the
+// gravity direction, so these come straight from a.x/a.y.) Derived per
+// orientation from where screen-right / screen-down point on the device.
+function setScreenGravity(gx, gy) {
   let sx, sy;
   switch (lastOrientAngle) {
-    case 90:  sx =  devDown; sy = -devLR;  break;
-    case 180: sx = -devLR;   sy = -devDown; break;
-    case 270: sx = -devDown; sy =  devLR;  break;
-    default:  sx =  devLR;   sy =  devDown;        // 0° — portrait
+    case 90:  sx =  gy; sy =  gx; break;   // right=+devY, down=+devX
+    case 180: sx = -gx; sy =  gy; break;   // right=-devX, down=+devY
+    case 270: sx = -gy; sy = -gx; break;   // right=-devY, down=-devX
+    default:  sx =  gx; sy = -gy;          // 0° portrait: right=+devX, down=-devY
   }
   gVec.x = clamp(sx * SIGNS.xSign, -1, 1);
   gVec.y = clamp(sy * SIGNS.ySign, -1, 1);
@@ -419,7 +422,8 @@ function onOrientation(e) {
   rawGamma = e.gamma ?? 0;
 
   if (motionActive) return;                          // devicemotion drives gVec when available
-  setScreenGravity(rawGamma / 90, rawBeta / 90);
+  // Fallback: approximate device-frame gravity from the Euler angles.
+  setScreenGravity(Math.sin(rawGamma * Math.PI / 180), -Math.sin(rawBeta * Math.PI / 180));
 }
 
 // Preferred gravity source: accelerationIncludingGravity has no gimbal lock, so
@@ -431,11 +435,11 @@ function onMotion(e) {
   motionActive = true;
   if (!sensorsActive) sensorsActive = true;
 
-  const lr   =  clamp((a.x ?? 0) / G_NORM, -1, 1);   // device left/right
-  const down = -clamp((a.y ?? 0) / G_NORM, -1, 1);   // device down-the-screen (+1 at upright)
-  accFilt.lr   += (lr   - accFilt.lr)   * 0.25;       // light low-pass vs shake noise
-  accFilt.down += (down - accFilt.down) * 0.25;
-  setScreenGravity(accFilt.lr, accFilt.down);
+  const gx = clamp((a.x ?? 0) / G_NORM, -1, 1);      // gravity toward device right
+  const gy = clamp((a.y ?? 0) / G_NORM, -1, 1);      // gravity toward device top
+  gFilt.x += (gx - gFilt.x) * 0.25;                  // light low-pass vs shake noise
+  gFilt.y += (gy - gFilt.y) * 0.25;
+  setScreenGravity(gFilt.x, gFilt.y);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -665,7 +669,7 @@ function updateDebug() {
     : ' (desktop)';
   document.getElementById('calibOrient').textContent = (ORIENT_NAMES[angle] ?? angle + '°') + tag;
   document.getElementById('calibSensorVals').textContent =
-    `β ${rawBeta.toFixed(1)}° γ ${rawGamma.toFixed(1)}° · ${motionActive ? `a(${accFilt.lr.toFixed(2)},${accFilt.down.toFixed(2)})` : 'no motion'}`;
+    `β ${rawBeta.toFixed(1)}° γ ${rawGamma.toFixed(1)}° · ${motionActive ? `g(${gFilt.x.toFixed(2)},${gFilt.y.toFixed(2)})` : 'no motion'}`;
   document.getElementById('blendReadout').textContent =
     `blend ${blend.toFixed(2)} · mode ${manualMode}${motionActive ? '' : (sensorsActive ? ' · orient' : ' · win')}\n` +
     `os ${getOrientAngle()}° · fine ${dbgFineTilt.toFixed(0)}° · rot ${rotAngle.toFixed(0)}° · ${dbgSwap ? 'swap' : 'no-swap'}\n` +
