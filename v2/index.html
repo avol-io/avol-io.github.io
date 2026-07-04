@@ -25,6 +25,11 @@
       will-change: transform;
     }
 
+    /* ── Fixed backdrop behind #rotor: mirrors the side crossfade
+       (same blend + same on-screen angle as the rotor's rotation) so the
+       corners/edges exposed by coverScale never show flat black. ────── */
+    #stage { position: fixed; inset: 0; z-index: 0; }
+
     /* ── Two home "souls" — stacked full-screen layers ───────── */
     .side { position: absolute; inset: 0; }
     #sideProfessional { z-index: 1; background: #0e141d; }   /* deep blue — professional */
@@ -172,6 +177,9 @@
 </head>
 <body>
 
+<!-- ── Fixed backdrop, synced blend/angle, does not rotate ──────── -->
+<div id="stage"></div>
+
 <!-- ── Rotor: both sides rotate together to keep content upright ── -->
 <div id="rotor">
 
@@ -182,7 +190,7 @@
       <h1>Professionale</h1>
       <p>Qui andrà il contenuto professionale.</p>
       <small>scorri ↓</small>
-        <small>v29</small>
+        <small>v29.1</small>
     </section>
     <section class="slide">
       <h1>Esperienza</h1>
@@ -370,6 +378,7 @@ let lastScreenX = window.screenX, lastScreenY = window.screenY;
 // ═══════════════════════════════════════════════════════
 const physCanvas    = document.getElementById('physicsCanvas');
 const ctx           = physCanvas.getContext('2d');
+const stage         = document.getElementById('stage');
 const rotor         = document.getElementById('rotor');
 const sideProf      = document.getElementById('sideProfessional');
 const sideCreative  = document.getElementById('sideCreative');
@@ -625,6 +634,16 @@ function applyRotation() {
   rotor.style.transform = `translate(-50%, -50%) rotate(${rotAngle}deg) scale(${s})`;
 }
 
+// Fixed backdrop: same blend fraction as the side crossfade, but the
+// gradient angle tracks rotAngle so its on-screen direction matches the
+// rotor's seam even though #stage itself never rotates.
+function applyStageBackground() {
+  const angle = 90 + rotAngle;
+  const pct = blend * 100;
+  stage.style.background =
+    `linear-gradient(${angle}deg, #0e141d calc(${pct}% - ${FEATHER}px), #c2185b calc(${pct}% + ${FEATHER}px))`;
+}
+
 // ═══════════════════════════════════════════════════════
 //  DEBUG
 // ═══════════════════════════════════════════════════════
@@ -684,6 +703,7 @@ function render() {
   blend += (blendTarget - blend) * BLEND_EASE;
   applyCrossfade();
   applyRotation();
+  applyStageBackground();
 
   ctx.clearRect(0, 0, W, H);
   const px = ball.nx * W, py = ball.ny * H, r = CFG.radius;
@@ -825,6 +845,7 @@ refreshObstacles();
 
 blend = blendTarget = computeBlendTarget();   // avoid an initial sweep
 applyCrossfade();
+applyStageBackground();
 requestAnimationFrame(loop);
 </script>
 </body>
