@@ -167,7 +167,7 @@
       border-color: rgba(224,48,48,.6) !important;
       background: rgba(224,48,48,.18) !important;
     }
-    #blendReadout { margin-top: 6px; font-size: .68rem; opacity: .6; text-align: center; font-variant-numeric: tabular-nums; white-space: pre-line; line-height: 1.5; }
+    #blendReadout { margin-top: 6px; font-size: .68rem; opacity: .55; text-align: center; font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -182,6 +182,7 @@
       <h1>Professionale</h1>
       <p>Qui andrà il contenuto professionale.</p>
       <small>scorri ↓</small>
+        <small>v29</small>
     </section>
     <section class="slide">
       <h1>Esperienza</h1>
@@ -298,8 +299,6 @@ const ROT_SIGN = 1;           // flip to -1 if content rotates the wrong way on 
 const MAX_FRAME_V = 2.5;      // cap on the wall "hit" velocity (normalised/sec)
 const MAX_JUMP    = 220;      // px: clamp implausible per-frame window jumps (anti-flicker)
 
-const G_NORM = 9.81;          // m/s² — normaliser for accelerationIncludingGravity
-
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ═══════════════════════════════════════════════════════
@@ -358,13 +357,10 @@ let W = 0, H = 0;
 let lastOrientAngle = getOrientAngle();
 let rawBeta = 0, rawGamma = 0;
 
-let sensorsActive = false;                   // true once real sensor events arrive
-let motionActive  = false;                   // devicemotion gravity available (preferred source)
-const gFilt = { x: 0, y: -1 };               // low-passed device-frame gravity (a≈gravity dir)
+let sensorsActive = false;                   // true once real orientation events arrive
 let manualMode = 'auto';                     // 'auto' | 'pro' | 'creative'
 let blend = 0, blendTarget = 0;              // 0 = professional, 1 = creative
 let rotAngle = 0;                            // current content rotation (deg)
-let dbgFineTilt = 0, dbgSwap = false;        // debug diagnostics
 
 // desktop window-frame tracking
 let lastScreenX = window.screenX, lastScreenY = window.screenY;
@@ -391,57 +387,36 @@ if (DEBUG) document.body.classList.add('debug');
 // ═══════════════════════════════════════════════════════
 let orientationDetected = false;
 
-// Map device-frame gravity to screen axes for the current orientation, then
-// apply manual sign calibration. (gx = gravity toward device right edge,
-// gy = gravity toward device top edge; accelerationIncludingGravity ≈ the
-// gravity direction, so these come straight from a.x/a.y.) Derived per
-// orientation from where screen-right / screen-down point on the device.
-function setScreenGravity(gx, gy) {
-  let sx, sy;
-  switch (lastOrientAngle) {
-    case 90:  sx =  gy; sy =  gx; break;   // right=+devY, down=+devX
-    case 180: sx = -gx; sy =  gy; break;   // right=-devX, down=+devY
-    case 270: sx = -gy; sy = -gx; break;   // right=-devY, down=-devX
-    default:  sx =  gx; sy = -gy;          // 0° portrait: right=+devX, down=-devY
-  }
-  gVec.x = clamp(sx * SIGNS.xSign, -1, 1);
-  gVec.y = clamp(sy * SIGNS.ySign, -1, 1);
-}
-
 function onOrientation(e) {
   // Ignore phantom events (desktop browsers fire null-valued ones).
   if (e.beta == null && e.gamma == null) return;
 
-  if (!sensorsActive) sensorsActive = true;
+  if (!sensorsActive) {
+    sensorsActive = true;
+    gVec.x = 0; gVec.y = 1;
+  }
   if (!orientationDetected) {
     detectNaturalOrientation();
     orientationDetected = true;
     lastOrientAngle = getOrientAngle();
   }
+
   rawBeta  = e.beta  ?? 0;
   rawGamma = e.gamma ?? 0;
 
-  if (motionActive) return;                          // devicemotion drives gVec when available
-  // Fallback: approximate device-frame gravity from the Euler angles.
-  setScreenGravity(Math.sin(rawGamma * Math.PI / 180), -Math.sin(rawBeta * Math.PI / 180));
-}
+  const g = rawGamma / 90;
+  const b = rawBeta  / 90;
 
-// Preferred gravity source: accelerationIncludingGravity has no gimbal lock, so
-// it stays continuous through poses iOS can't report (e.g. upside-down portrait),
-// fixing the ball/text flipping there. Signs are correctable via Inverti X/Y.
-function onMotion(e) {
-  const a = e.accelerationIncludingGravity;
-  if (!a || (a.x == null && a.y == null)) return;
-  motionActive = true;
-  if (!sensorsActive) sensorsActive = true;
+  let sx, sy;
+  switch (lastOrientAngle) {
+    case 90:  sx =  b; sy = -g; break;
+    case 180: sx = -g; sy = -b; break;
+    case 270: sx = -b; sy =  g; break;
+    default:  sx =  g; sy =  b;   // 0° — portrait
+  }
 
-  // accelerationIncludingGravity points opposite to the gravity direction, so
-  // negate it to get the true gravity vector in the device frame.
-  const gx = clamp(-(a.x ?? 0) / G_NORM, -1, 1);     // gravity toward device right
-  const gy = clamp(-(a.y ?? 0) / G_NORM, -1, 1);     // gravity toward device top
-  gFilt.x += (gx - gFilt.x) * 0.25;                  // light low-pass vs shake noise
-  gFilt.y += (gy - gFilt.y) * 0.25;
-  setScreenGravity(gFilt.x, gFilt.y);
+  gVec.x = clamp(sx * SIGNS.xSign, -1, 1);
+  gVec.y = clamp(sy * SIGNS.ySign, -1, 1);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -574,15 +549,9 @@ function computeBlendTarget() {
   if (manualMode === 'creative') return 1;
 
   if (sensorsActive) {
-    // Mobile: a single "physical roll" = OS orientation (handles auto-rotate,
-    // robust on iPhone/iPad via getOrientAngle) + fine gravity tilt (handles
-    // the rotation-locked case). Works in both states; ±180 / 90-vs-270
-    // ambiguities cancel out under mod 180.
-    const fineTilt  = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;
-    const totalRoll = getOrientAngle() + fineTilt;
-    const rollMod   = ((totalRoll % 180) + 180) % 180;          // 0..180
-    const degFromPortrait = Math.min(rollMod, 180 - rollMod);   // 0 portrait .. 90 landscape
-    return clamp((degFromPortrait - TILT_LOW) / (TILT_HIGH - TILT_LOW), 0, 1);
+    // Mobile: derive from tilt with deadzones at the extremes.
+    const tiltDeg = Math.atan2(Math.abs(gVec.x), Math.abs(gVec.y)) * 180 / Math.PI;
+    return clamp((tiltDeg - TILT_LOW) / (TILT_HIGH - TILT_LOW), 0, 1);
   }
   // Desktop: the seam is anchored to the SCREEN's horizontal centre. It only
   // shows inside the window where that centre falls; once the window clears the
@@ -629,16 +598,14 @@ function applyRotation() {
   const vw = window.innerWidth, vh = window.innerHeight;
   let q = 0, target = 0;
 
-  let fineTilt = 0;
   if (sensorsActive) {
-    fineTilt = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;        // signed roll within orientation
+    const fineTilt = Math.atan2(gVec.x, gVec.y) * 180 / Math.PI;   // signed roll within orientation
     q = Math.round(fineTilt / 90);
     const dev = fineTilt - q * 90;                                // distance from nearest quarter
     const applied = Math.abs(dev) <= ROT_DEAD ? q * 90 : fineTilt;
     q = Math.round(applied / 90);
     target = ROT_SIGN * -applied;
   }
-  dbgFineTilt = fineTilt;
 
   let d = target - rotAngle;
   while (d >  180) d -= 360;
@@ -646,7 +613,6 @@ function applyRotation() {
   rotAngle += d * ROT_EASE;
 
   const swap = (Math.abs(q) % 2) === 1;                           // odd quarter → portrait↔landscape
-  dbgSwap = swap;
   const rw = swap ? vh : vw;
   const rh = swap ? vw : vh;
   const s  = coverScale(rw, rh, rotAngle, vw, vh);
@@ -670,12 +636,9 @@ function updateDebug() {
     ? (naturalIsLandscape ? ' (iPad/landscape)' : ' (iPhone/portrait)')
     : ' (desktop)';
   document.getElementById('calibOrient').textContent = (ORIENT_NAMES[angle] ?? angle + '°') + tag;
-  document.getElementById('calibSensorVals').textContent =
-    `β ${rawBeta.toFixed(1)}° γ ${rawGamma.toFixed(1)}° · ${motionActive ? `g(${gFilt.x.toFixed(2)},${gFilt.y.toFixed(2)})` : 'no motion'}`;
+  document.getElementById('calibSensorVals').textContent = `β ${rawBeta.toFixed(1)}°  γ ${rawGamma.toFixed(1)}°`;
   document.getElementById('blendReadout').textContent =
-    `blend ${blend.toFixed(2)} · mode ${manualMode}${motionActive ? '' : (sensorsActive ? ' · orient' : ' · win')}\n` +
-    `os ${getOrientAngle()}° · fine ${dbgFineTilt.toFixed(0)}° · rot ${rotAngle.toFixed(0)}° · ${dbgSwap ? 'swap' : 'no-swap'}\n` +
-    `gVec (${gVec.x.toFixed(2)}, ${gVec.y.toFixed(2)})`;
+    `blend ${blend.toFixed(2)} · mode ${manualMode}${sensorsActive ? '' : ' · win'}`;
 
   drawArrow(arrowRawCtx,   58, rawGamma / 90, rawBeta / 90, '#4a9eff');
   drawArrow(arrowCalCtx,   58, gVec.x,        gVec.y,       '#e03030');
@@ -758,38 +721,27 @@ function loop(ts) {
 // ═══════════════════════════════════════════════════════
 function setupOrientation() {
   const btn = document.getElementById('permBtn');
-  const start = () => {
-    window.addEventListener('deviceorientation', onOrientation);
-    window.addEventListener('devicemotion', onMotion);
-  };
-  const needsPrompt =
-    typeof DeviceOrientationEvent?.requestPermission === 'function' ||
-    typeof DeviceMotionEvent?.requestPermission === 'function';
-
-  if (needsPrompt) {
-    // iOS — one tap requests both orientation and motion permissions.
+  if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+    // iOS — needs an explicit user gesture.
     btn.style.display = 'inline-block';
     btn.addEventListener('click', () => {
-      const reqs = [];
-      if (typeof DeviceOrientationEvent?.requestPermission === 'function')
-        reqs.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
-      if (typeof DeviceMotionEvent?.requestPermission === 'function')
-        reqs.push(DeviceMotionEvent.requestPermission().catch(() => 'denied'));
-      Promise.all(reqs).then(rs => {
-        if (rs.some(s => s === 'granted')) {
-          start();
-          // Fade the button out, then drop it as an obstacle so the ball falls.
-          btn.dataset.disabled = '1';
-          btn.style.opacity = '0';
-          refreshObstacles();
-          setTimeout(() => { btn.style.display = 'none'; }, 300);
-        }
-      });
+      DeviceOrientationEvent.requestPermission()
+        .then(s => {
+          if (s === 'granted') {
+            window.addEventListener('deviceorientation', onOrientation);
+            // Fade the button out, then drop it as an obstacle so the ball falls.
+            btn.dataset.disabled = '1';
+            btn.style.opacity = '0';
+            refreshObstacles();
+            setTimeout(() => { btn.style.display = 'none'; }, 300);
+          }
+        })
+        .catch(() => {});
     });
-  } else if (window.DeviceOrientationEvent || window.DeviceMotionEvent) {
-    // Android / desktop — listen directly; desktop never fires real events
-    // (or fires null-valued ones, ignored) → stays desktop mode.
-    start();
+  } else if (window.DeviceOrientationEvent) {
+    // Android / desktop — listen directly; desktop simply never fires real events
+    // (or fires null-valued ones, ignored in onOrientation) → stays desktop mode.
+    window.addEventListener('deviceorientation', onOrientation);
   }
 }
 
